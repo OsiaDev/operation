@@ -1,0 +1,38 @@
+server:
+  port: ${PORT:8080}
+  address: 0.0.0.0
+
+spring:
+  application:
+    name: umas-operation-service
+
+  r2dbc:
+    host: ${DB_HOST:localhost}
+    port: ${DB_PORT:5432}
+    database: ${DB_NAME:umas_db}
+    username: ${DB_USER:umas_user}
+    password: ${DB_PASS:umas_pass}
+    pool:
+      initial-size: 10
+      max-size: 20
+      max-idle-time: 30m
+      validation-query: SELECT 1
+
+  kafka:
+    consumer:
+      bootstrap-servers: ${KAFKA_BROKERS:localhost:29092}
+      group-id: umas-operation-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+      properties:
+        spring.json.trusted.packages: "co.cetad.umas.operation.domain.model.vo"
+    producer:
+      bootstrap-servers: ${KAFKA_BROKERS:localhost:29092}
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
