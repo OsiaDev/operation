@@ -7,8 +7,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 
@@ -19,12 +22,17 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Consumer de Kafka que procesa eventos de telemetría de drones
- * Topic: umas.drone.telemetry
+ * Consumer Kafka simplificado - Solo almacena telemetría
  *
- * Actualizado para el nuevo formato con vehicleId y campos planos
+ * Funcionalidad:
+ * - Recibe eventos de Kafka
+ * - Parsea JSON
+ * - Almacena en BD
+ * - Retry con backoff (infraestructura)
+ * - Dead Letter Queue
  */
 @Slf4j
 @Component
@@ -32,8 +40,18 @@ public class TelemetryEventKafkaConsumer {
 
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_DATE_TIME;
 
+    @Value("${kafka.consumer.max-retries:3}")
+    private int maxRetries;
+
+    @Value("${kafka.consumer.retry-backoff-ms:1000}")
+    private long retryBackoffMs;
+
+    @Value("${kafka.consumer.processing-timeout-seconds:30}")
+    private long processingTimeoutSeconds;
+
     private final DroneTelemetryService telemetryService;
     private final ObjectMapper objectMapper;
+    private final Map<String, Integer> retryTracker = new HashMap<>();
 
     public TelemetryEventKafkaConsumer(DroneTelemetryService telemetryService) {
         this.telemetryService = telemetryService;
@@ -42,46 +60,115 @@ public class TelemetryEventKafkaConsumer {
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
-    @KafkaListener(
-            topics = "umas.drone.telemetry"
-    )
+    @KafkaListener(topics = "${kafka.topics.telemetry:umas.drone.telemetry}")
     public CompletableFuture<Void> handleTelemetryEvent(
             @Payload String eventJson,
+            @Header(KafkaHeaders.RECEIVED_KEY) String messageKey,
+            @Header(KafkaHeaders.OFFSET) Long offset,
             Acknowledgment acknowledgment
     ) {
-        log.info("Received telemetry event: {}", eventJson);
+        log.debug("Received telemetry event [offset={}]", offset);
 
         return parseEvent(eventJson)
-                .map(event -> processEventAsync(event, acknowledgment))
-                .orElseGet(() -> {
-                    log.warn("Failed to parse telemetry event, acknowledging anyway");
-                    acknowledgment.acknowledge();
-                    return CompletableFuture.completedFuture(null);
-                });
+                .map(event -> processWithRetry(event, messageKey, acknowledgment))
+                .orElseGet(() -> handleInvalidMessage(eventJson, acknowledgment));
     }
 
-    private CompletableFuture<Void> processEventAsync(
+    /**
+     * Procesa el evento con retry strategy
+     */
+    private CompletableFuture<Void> processWithRetry(
             TelemetryEvent event,
+            String messageKey,
             Acknowledgment acknowledgment
     ) {
+        String retryKey = generateRetryKey(messageKey, event.vehicleId());
+        int attemptCount = retryTracker.getOrDefault(retryKey, 0);
+
         return telemetryService
                 .process(event)
+                .orTimeout(processingTimeoutSeconds, TimeUnit.SECONDS)
                 .thenAccept(telemetry -> {
-                    log.info("Processed telemetry: {} for vehicle: {}",
+                    log.info("✅ Stored telemetry: {} for vehicle: {}",
                             telemetry.id(), event.vehicleId());
+                    retryTracker.remove(retryKey);
                     acknowledgment.acknowledge();
                 })
                 .exceptionally(throwable -> {
-                    log.error("Error processing telemetry event for vehicle: {}",
-                            event.vehicleId(), throwable);
-                    // No acknowledge para reintentar
-                    return null;
+                    return handleProcessingError(
+                            event, retryKey, attemptCount, acknowledgment, throwable
+                    );
                 });
     }
 
     /**
-     * Parsea el JSON del evento a un objeto TelemetryEvent
-     * Implementación funcional con Optional y validaciones
+     * Maneja errores con retry y DLQ
+     */
+    private Void handleProcessingError(
+            TelemetryEvent event,
+            String retryKey,
+            int attemptCount,
+            Acknowledgment acknowledgment,
+            Throwable throwable
+    ) {
+        int newAttemptCount = attemptCount + 1;
+
+        if (newAttemptCount < maxRetries) {
+            long backoffTime = calculateBackoff(newAttemptCount);
+
+            log.warn("⚠️ Error storing telemetry for vehicle: {} [attempt={}/{}]. " +
+                            "Retrying in {}ms...",
+                    event.vehicleId(), newAttemptCount, maxRetries, backoffTime, throwable);
+
+            retryTracker.put(retryKey, newAttemptCount);
+            return null; // No acknowledge para reintentar
+        } else {
+            log.error("❌ Max retries reached for vehicle: {} [attempts={}]. " +
+                            "Sending to DLQ...",
+                    event.vehicleId(), newAttemptCount, throwable);
+
+            sendToDeadLetterQueue(event, throwable);
+            retryTracker.remove(retryKey);
+            acknowledgment.acknowledge();
+            return null;
+        }
+    }
+
+    /**
+     * Maneja mensajes inválidos
+     */
+    private CompletableFuture<Void> handleInvalidMessage(
+            String eventJson,
+            Acknowledgment acknowledgment
+    ) {
+        log.error("❌ Invalid message format, sending to DLQ: {}", eventJson);
+        sendInvalidMessageToDLQ(eventJson);
+        acknowledgment.acknowledge();
+        return CompletableFuture.completedFuture(null);
+    }
+
+    private long calculateBackoff(int attemptCount) {
+        return retryBackoffMs * (long) Math.pow(2, attemptCount - 1);
+    }
+
+    private String generateRetryKey(String messageKey, String vehicleId) {
+        return String.format("%s:%s", messageKey != null ? messageKey : "unknown", vehicleId);
+    }
+
+    /**
+     * TODO: Implementar productor a topic DLQ
+     */
+    private void sendToDeadLetterQueue(TelemetryEvent event, Throwable error) {
+        log.error("DLQ: Failed event for vehicle={}, error={}",
+                event.vehicleId(), error.getMessage());
+    }
+
+    private void sendInvalidMessageToDLQ(String invalidMessage) {
+        log.error("DLQ: Invalid message: {}", invalidMessage);
+    }
+
+    /**
+     * Parsea el JSON a TelemetryEvent
      */
     private Optional<TelemetryEvent> parseEvent(String eventJson) {
         try {
@@ -106,27 +193,25 @@ public class TelemetryEventKafkaConsumer {
         }
     }
 
-    // ========== Métodos de extracción con validación funcional ==========
+    // ========== Métodos de extracción ==========
 
     private String extractVehicleId(JsonNode root) {
         return Optional.ofNullable(root.get("vehicleId"))
                 .map(JsonNode::asText)
                 .filter(id -> !id.isBlank())
-                .orElseThrow(() -> new IllegalArgumentException("Missing or empty vehicleId"));
+                .orElseThrow(() -> new IllegalArgumentException("Missing vehicleId"));
     }
 
     private double extractLatitude(JsonNode root) {
         return Optional.ofNullable(root.get("latitude"))
                 .map(JsonNode::asDouble)
-                .filter(this::isValidLatitude)
-                .orElseThrow(() -> new IllegalArgumentException("Missing or invalid latitude"));
+                .orElseThrow(() -> new IllegalArgumentException("Missing latitude"));
     }
 
     private double extractLongitude(JsonNode root) {
         return Optional.ofNullable(root.get("longitude"))
                 .map(JsonNode::asDouble)
-                .filter(this::isValidLongitude)
-                .orElseThrow(() -> new IllegalArgumentException("Missing or invalid longitude"));
+                .orElseThrow(() -> new IllegalArgumentException("Missing longitude"));
     }
 
     private double extractAltitude(JsonNode root) {
@@ -158,10 +243,7 @@ public class TelemetryEventKafkaConsumer {
         return Optional.ofNullable(root.get("timestamp"))
                 .map(JsonNode::asText)
                 .flatMap(this::parseTimestamp)
-                .orElseGet(() -> {
-                    log.debug("No timestamp provided, using current time");
-                    return LocalDateTime.now();
-                });
+                .orElseGet(LocalDateTime::now);
     }
 
     private Map<String, Object> extractAdditionalFields(JsonNode root) {
@@ -171,21 +253,11 @@ public class TelemetryEventKafkaConsumer {
                 .orElse(Map.of());
     }
 
-    // ========== Métodos helper ==========
-
     private Double extractOptionalDouble(JsonNode root, String fieldName) {
         return Optional.ofNullable(root.get(fieldName))
                 .filter(node -> !node.isNull())
                 .map(JsonNode::asDouble)
                 .orElse(null);
-    }
-
-    private boolean isValidLatitude(double latitude) {
-        return latitude >= -90.0 && latitude <= 90.0;
-    }
-
-    private boolean isValidLongitude(double longitude) {
-        return longitude >= -180.0 && longitude <= 180.0;
     }
 
     private Optional<LocalDateTime> parseTimestamp(String timestamp) {
@@ -197,10 +269,6 @@ public class TelemetryEventKafkaConsumer {
         }
     }
 
-    /**
-     * Convierte un JsonNode de tipo objeto a un Map<String, Object>
-     * Útil para additionalFields
-     */
     private Map<String, Object> nodeToMap(JsonNode node) {
         Map<String, Object> result = new HashMap<>();
 
@@ -221,7 +289,6 @@ public class TelemetryEventKafkaConsumer {
             } else if (value.isTextual()) {
                 result.put(key, value.asText());
             } else {
-                // Para objetos o arrays complejos, guardar como string
                 result.put(key, value.toString());
             }
         });

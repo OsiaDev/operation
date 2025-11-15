@@ -3,7 +3,8 @@ package co.cetad.umas.operation.domain.model.vo;
 import java.util.Objects;
 
 /**
- * Value Object que representa una ubicación geográfica
+ * Value Object simplificado que representa una ubicación geográfica
+ * Solo validaciones técnicas básicas
  */
 public record GeoLocation(
         double latitude,
@@ -16,17 +17,12 @@ public record GeoLocation(
         Objects.requireNonNull(latitude, "Latitude cannot be null");
         Objects.requireNonNull(longitude, "Longitude cannot be null");
 
+        // Solo validaciones técnicas básicas de coordenadas
         if (latitude < -90 || latitude > 90) {
             throw new IllegalArgumentException("Latitude must be between -90 and 90");
         }
         if (longitude < -180 || longitude > 180) {
             throw new IllegalArgumentException("Longitude must be between -180 and 180");
-        }
-        if (altitude != null && altitude < 0) {
-            throw new IllegalArgumentException("Altitude cannot be negative");
-        }
-        if (accuracy != null && accuracy < 0) {
-            throw new IllegalArgumentException("Accuracy cannot be negative");
         }
     }
 
@@ -36,11 +32,6 @@ public record GeoLocation(
 
     public static GeoLocation withAltitude(double latitude, double longitude, double altitude) {
         return new GeoLocation(latitude, longitude, altitude, null);
-    }
-
-    public boolean isValid() {
-        return latitude >= -90 && latitude <= 90 &&
-                longitude >= -180 && longitude <= 180;
     }
 
     /**

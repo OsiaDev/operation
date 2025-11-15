@@ -8,8 +8,8 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * Value Object que representa un evento de telemetría recibido desde Kafka
- * Adaptado al nuevo formato con vehicleId y campos planos
+ * Value Object simplificado que representa un evento de telemetría
+ * Solo datos, sin lógica de negocio
  */
 public record TelemetryEvent(
         @JsonProperty("vehicleId") String vehicleId,
@@ -30,12 +30,9 @@ public record TelemetryEvent(
             throw new IllegalArgumentException("Vehicle ID cannot be empty");
         }
 
-        validateLatitude(latitude);
-        validateLongitude(longitude);
-
         Objects.requireNonNull(timestamp, "Timestamp cannot be null");
 
-        // additionalFields puede ser null, lo manejamos
+        // Limpiar additionalFields de nulls
         if (additionalFields != null) {
             additionalFields = additionalFields.entrySet().stream()
                     .filter(entry -> entry.getKey() != null && entry.getValue() != null)
@@ -48,7 +45,6 @@ public record TelemetryEvent(
 
     /**
      * Crea una GeoLocation a partir de las coordenadas
-     * Útil para mantener compatibilidad con el dominio interno
      */
     public GeoLocation toGeoLocation() {
         return new GeoLocation(
@@ -61,7 +57,6 @@ public record TelemetryEvent(
 
     /**
      * Crea TelemetryMetrics a partir de los campos de métricas
-     * Útil para mantener compatibilidad con el dominio interno
      */
     public TelemetryMetrics toTelemetryMetrics() {
         return new TelemetryMetrics(
@@ -71,64 +66,6 @@ public record TelemetryEvent(
                 extractTemperature(),
                 extractSignalStrength()
         );
-    }
-
-    /**
-     * Verifica si el evento requiere una alerta
-     */
-    public boolean requiresAlert() {
-        return isBatteryCritical() ||
-                isSignalWeak() ||
-                isOverheating() ||
-                isSatelliteLoss();
-    }
-
-    /**
-     * Obtiene la razón de la alerta
-     */
-    public String getAlertReason() {
-        if (isBatteryCritical()) {
-            return "Critical battery level: " + batteryLevel + "%";
-        }
-        if (isSignalWeak()) {
-            Double signal = extractSignalStrength();
-            return "Weak signal strength: " + (signal != null ? signal + " dBm" : "unknown");
-        }
-        if (isOverheating()) {
-            Double temp = extractTemperature();
-            return "Overheating: " + (temp != null ? temp + "°C" : "unknown");
-        }
-        if (isSatelliteLoss()) {
-            return "Low satellite count: " + satelliteCount;
-        }
-        return null;
-    }
-
-    /**
-     * Alias para vehicleId (compatibilidad con código existente)
-     */
-    public String vehicleId() {
-        return vehicleId;
-    }
-
-    // ========== Métodos de validación y extracción ==========
-
-    private boolean isBatteryCritical() {
-        return batteryLevel != null && batteryLevel < 10;
-    }
-
-    private boolean isSignalWeak() {
-        Double signal = extractSignalStrength();
-        return signal != null && signal < -90;
-    }
-
-    private boolean isOverheating() {
-        Double temp = extractTemperature();
-        return temp != null && temp > 70;
-    }
-
-    private boolean isSatelliteLoss() {
-        return satelliteCount != null && satelliteCount < 4;
     }
 
     /**
@@ -185,22 +122,6 @@ public record TelemetryEvent(
             }
         }
         return null;
-    }
-
-    private static void validateLatitude(double latitude) {
-        if (latitude < -90 || latitude > 90) {
-            throw new IllegalArgumentException(
-                    "Latitude must be between -90 and 90, got: " + latitude
-            );
-        }
-    }
-
-    private static void validateLongitude(double longitude) {
-        if (longitude < -180 || longitude > 180) {
-            throw new IllegalArgumentException(
-                    "Longitude must be between -180 and 180, got: " + longitude
-            );
-        }
     }
 
     /**
