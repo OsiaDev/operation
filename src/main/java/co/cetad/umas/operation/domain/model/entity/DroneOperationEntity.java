@@ -7,21 +7,27 @@ import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 /**
  * Entidad de persistencia para operaciones de drones
  * Implementa Persistable para controlar INSERT vs UPDATE
+ *
+ * Nota: Usa UUID para id, droneId y routeId para eficiencia en PostgreSQL
  */
 @Table("drone_operation")
 public record DroneOperationEntity(
         @Id
-        String id,
+        UUID id,
 
         @Column("drone_id")
-        String droneId,
+        UUID droneId,
 
         @Column("route_id")
-        String routeId,
+        UUID routeId,
+
+        @Column("status")
+        String status,
 
         @Column("start_date")
         LocalDateTime startDate,
@@ -34,36 +40,44 @@ public record DroneOperationEntity(
 
         @Transient
         boolean isNew
-) implements Persistable<String> {
+) implements Persistable<UUID> {
 
+    /**
+     * Constructor para nuevas entidades (INSERT)
+     */
     public static DroneOperationEntity create(
-            String id,
-            String droneId,
-            String routeId,
+            UUID id,
+            UUID droneId,
+            UUID routeId,
+            String status,
             LocalDateTime startDate,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {
         return new DroneOperationEntity(
-                id, droneId, routeId, startDate, createdAt, updatedAt, true
+                id, droneId, routeId, status, startDate, createdAt, updatedAt, true
         );
     }
 
+    /**
+     * Constructor para entidades desde BD (UPDATE)
+     */
     public static DroneOperationEntity fromDatabase(
-            String id,
-            String droneId,
-            String routeId,
+            UUID id,
+            UUID droneId,
+            UUID routeId,
+            String status,
             LocalDateTime startDate,
             LocalDateTime createdAt,
             LocalDateTime updatedAt
     ) {
         return new DroneOperationEntity(
-                id, droneId, routeId, startDate, createdAt, updatedAt, false
+                id, droneId, routeId, status, startDate, createdAt, updatedAt, false
         );
     }
 
     @Override
-    public String getId() {
+    public UUID getId() {
         return id;
     }
 

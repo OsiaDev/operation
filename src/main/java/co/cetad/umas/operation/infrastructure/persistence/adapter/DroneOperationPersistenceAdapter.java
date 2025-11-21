@@ -11,10 +11,13 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
  * Adaptador de persistencia para operaciones
+ *
+ * IMPORTANTE: Maneja conversión String-UUID para compatibilidad con PostgreSQL
  */
 @Slf4j
 @Component
@@ -45,11 +48,16 @@ public class DroneOperationPersistenceAdapter implements DroneOperationRepositor
     @Override
     public CompletableFuture<Optional<DroneOperation>> findById(String id) {
         return toCompletableFuture(
-                r2dbcRepository.findById(id)
+                Mono.fromCallable(() -> UUID.fromString(id))  // ✅ Conversión String -> UUID
+                        .flatMap(r2dbcRepository::findById)
                         .timeout(DEFAULT_TIMEOUT)
                         .map(DroneOperationMapper.toDomain)
                         .map(Optional::of)
-                        .defaultIfEmpty(Optional.empty()),
+                        .defaultIfEmpty(Optional.empty())
+                        .onErrorResume(IllegalArgumentException.class, error -> {
+                            log.warn("Invalid UUID format: {}", id);
+                            return Mono.just(Optional.empty());
+                        }),
                 () -> "Failed to find operation by id: " + id
         );
     }
