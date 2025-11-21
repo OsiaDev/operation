@@ -1,10 +1,14 @@
 package co.cetad.umas.operation.domain.model.entity;
 
+import org.springframework.data.relational.core.mapping.Table;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
+@Table("drone")
 public record DroneEntity(
-        String id,
+        UUID id,
         String name,
         String vehicleId,
         String model,
