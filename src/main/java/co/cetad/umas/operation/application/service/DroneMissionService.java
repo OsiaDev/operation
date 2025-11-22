@@ -61,14 +61,14 @@ public class DroneMissionService implements CreateDroneMissionUseCase {
     private DroneMission validateMission(DroneMission mission, String commanderName) {
         log.debug("Validating mission for drone: {}", mission.droneId());
 
-        if (mission.id() == null || mission.id().isBlank()) {
-            throw new IllegalArgumentException("Mission ID cannot be null or empty");
+        if (mission.id() == null) {
+            throw new IllegalArgumentException("Mission ID cannot be null");
         }
-        if (mission.droneId() == null || mission.droneId().isBlank()) {
-            throw new IllegalArgumentException("Drone ID cannot be null or empty");
+        if (mission.droneId() == null) {
+            throw new IllegalArgumentException("Drone ID cannot be null");
         }
-        if (mission.operatorId() == null || mission.operatorId().isBlank()) {
-            throw new IllegalArgumentException("Operator ID cannot be null or empty");
+        if (mission.operatorId() == null) {
+            throw new IllegalArgumentException("Operator ID cannot be null");
         }
         if (mission.startDate() == null) {
             throw new IllegalArgumentException("Start date cannot be null");

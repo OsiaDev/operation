@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -43,7 +44,7 @@ public class DroneMissionPersistenceAdapter implements DroneMissionRepository {
     }
 
     @Override
-    public CompletableFuture<Optional<DroneMission>> findById(String id) {
+    public CompletableFuture<Optional<DroneMission>> findById(UUID id) {
         return toCompletableFuture(
                 r2dbcRepository.findById(id)
                         .timeout(DEFAULT_TIMEOUT)

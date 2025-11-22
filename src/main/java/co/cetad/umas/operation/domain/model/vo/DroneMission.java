@@ -36,16 +36,6 @@ public record DroneMission(
         Objects.requireNonNull(startDate, "Start date cannot be null");
         Objects.requireNonNull(createdAt, "Created at cannot be null");
         Objects.requireNonNull(updatedAt, "Updated at cannot be null");
-
-        if (id.isBlank()) {
-            throw new IllegalArgumentException("Mission ID cannot be empty");
-        }
-        if (droneId.isBlank()) {
-            throw new IllegalArgumentException("Drone ID cannot be empty");
-        }
-        if (operatorId.isBlank()) {
-            throw new IllegalArgumentException("Operator ID cannot be empty");
-        }
     }
 
     /**
@@ -62,14 +52,14 @@ public record DroneMission(
      */
     public static DroneMission createManual(
             String name,
-            String droneId,
-            String routeId,
-            String operatorId,
+            UUID droneId,
+            UUID routeId,
+            UUID operatorId,
             LocalDateTime startDate
     ) {
         LocalDateTime now = LocalDateTime.now();
         return new DroneMission(
-                UUID.randomUUID().toString(),
+                UUID.randomUUID(),
                 name,
                 droneId,
                 routeId,
@@ -92,13 +82,13 @@ public record DroneMission(
      * @return Nueva instancia de DroneMission automática
      */
     public static DroneMission createAutomatic(
-            String droneId,
-            String operatorId,
+            UUID droneId,
+            UUID operatorId,
             LocalDateTime startDate
     ) {
         LocalDateTime now = LocalDateTime.now();
         return new DroneMission(
-                UUID.randomUUID().toString(),
+                UUID.randomUUID(),
                 "Misión Automática",
                 droneId,
                 null,
@@ -115,7 +105,7 @@ public record DroneMission(
      * Verifica si la misión tiene una ruta asignada
      */
     public boolean hasRoute() {
-        return routeId != null && !routeId.isBlank();
+        return routeId != null;
     }
 
     /**
@@ -187,7 +177,7 @@ public record DroneMission(
     /**
      * Crea una copia de la misión con una nueva ruta asignada
      */
-    public DroneMission withRoute(String newRouteId) {
+    public DroneMission withRoute(UUID newRouteId) {
         return new DroneMission(
                 id, name, droneId, newRouteId, operatorId,
                 missionType, state, startDate, createdAt,

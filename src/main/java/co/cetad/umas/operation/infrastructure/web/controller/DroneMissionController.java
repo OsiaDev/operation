@@ -36,9 +36,9 @@ public class DroneMissionController {
      * Body:
      * {
      *   "name": "Misión de Reconocimiento",
-     *   "droneId": "uuid-drone",
-     *   "routeId": "uuid-route",
-     *   "operatorId": "uuid-operator",
+     *   "droneId": "550e8400-e29b-41d4-a716-446655440000",
+     *   "routeId": "650e8400-e29b-41d4-a716-446655440000",
+     *   "operatorId": "750e8400-e29b-41d4-a716-446655440000",
      *   "commanderName": "Juan Pérez",
      *   "startDate": "2025-11-22T10:00:00"
      * }
@@ -53,11 +53,12 @@ public class DroneMissionController {
         log.info("POST /api/missions - Creating mission for drone: {} by commander: {}",
                 request.droneId(), request.commanderName());
 
+        // Convertir los String UUIDs del request a UUIDs
         DroneMission mission = DroneMission.createManual(
                 request.name(),
-                request.droneId(),
-                request.routeId(),
-                request.operatorId(),
+                request.getDroneIdAsUUID(),
+                request.getRouteIdAsUUID(),
+                request.getOperatorIdAsUUID(),
                 request.startDate()
         );
 

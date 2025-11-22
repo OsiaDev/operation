@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -43,7 +44,7 @@ public class MissionOrderPersistenceAdapter implements MissionOrderRepository {
     }
 
     @Override
-    public CompletableFuture<Optional<MissionOrder>> findById(String id) {
+    public CompletableFuture<Optional<MissionOrder>> findById(UUID id) {
         return toCompletableFuture(
                 r2dbcRepository.findById(id)
                         .timeout(DEFAULT_TIMEOUT)

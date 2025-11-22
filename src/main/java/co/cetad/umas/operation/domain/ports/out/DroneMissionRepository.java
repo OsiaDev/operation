@@ -3,6 +3,7 @@ package co.cetad.umas.operation.domain.ports.out;
 import co.cetad.umas.operation.domain.model.vo.DroneMission;
 
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -18,6 +19,6 @@ public interface DroneMissionRepository {
     /**
      * Busca una misión por ID
      */
-    CompletableFuture<Optional<DroneMission>> findById(String id);
+    CompletableFuture<Optional<DroneMission>> findById(UUID id);
 
 }
