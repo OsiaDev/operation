@@ -6,11 +6,14 @@ import co.cetad.umas.operation.domain.model.entity.MissionState;
 import co.cetad.umas.operation.domain.model.vo.DroneMission;
 
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Function;
 
 /**
  * Mapper funcional entre el modelo de dominio y la entidad de persistencia
  * Mantiene la separación entre capas de arquitectura hexagonal
+ *
+ * Maneja conversiones String (dominio) ↔ UUID (persistencia)
  */
 public final class DroneMissionMapper {
 
@@ -19,15 +22,15 @@ public final class DroneMissionMapper {
     }
 
     /**
-     * Convierte de dominio a entidad de persistencia
+     * Convierte de dominio (String IDs) a entidad de persistencia (UUID IDs)
      */
     public static final Function<DroneMission, DroneMissionEntity> toEntity = mission ->
             DroneMissionEntity.create(
-                    mission.id(),
+                    UUID.fromString(mission.id()),
                     mission.name(),
-                    mission.droneId(),
-                    mission.routeId(),
-                    mission.operatorId(),
+                    UUID.fromString(mission.droneId()),
+                    parseUUID(mission.routeId()),
+                    UUID.fromString(mission.operatorId()),
                     mission.missionType(),
                     mission.state(),
                     mission.startDate(),
@@ -36,15 +39,15 @@ public final class DroneMissionMapper {
             );
 
     /**
-     * Convierte de entidad de persistencia a dominio
+     * Convierte de entidad de persistencia (UUID IDs) a dominio (String IDs)
      */
     public static final Function<DroneMissionEntity, DroneMission> toDomain = entity ->
             new DroneMission(
-                    entity.id(),
+                    entity.id().toString(),
                     entity.name(),
-                    entity.droneId(),
-                    entity.routeId(),
-                    entity.operatorId(),
+                    entity.droneId().toString(),
+                    formatUUID(entity.routeId()),
+                    entity.operatorId().toString(),
                     entity.missionType(),
                     entity.state(),
                     entity.startDate(),
@@ -53,35 +56,22 @@ public final class DroneMissionMapper {
             );
 
     /**
-     * Parsea el tipo de misión de forma segura
+     * Convierte String a UUID, retorna null si el String es null o vacío
      */
-    private static MissionOrigin parseMissionOrigin(String type) {
-        return Optional.ofNullable(type)
-                .map(String::toUpperCase)
-                .map(t -> {
-                    try {
-                        return MissionOrigin.valueOf(t);
-                    } catch (IllegalArgumentException e) {
-                        return MissionOrigin.AUTOMATICA;
-                    }
-                })
-                .orElse(MissionOrigin.AUTOMATICA);
+    private static UUID parseUUID(String uuidString) {
+        return Optional.ofNullable(uuidString)
+                .filter(s -> !s.isBlank())
+                .map(UUID::fromString)
+                .orElse(null);
     }
 
     /**
-     * Parsea el estado de la misión de forma segura
+     * Convierte UUID a String, retorna null si el UUID es null
      */
-    private static MissionState parseMissionState(String state) {
-        return Optional.ofNullable(state)
-                .map(String::toUpperCase)
-                .map(s -> {
-                    try {
-                        return MissionState.valueOf(s);
-                    } catch (IllegalArgumentException e) {
-                        return MissionState.PENDIENTE_APROBACION;
-                    }
-                })
-                .orElse(MissionState.PENDIENTE_APROBACION);
+    private static String formatUUID(UUID uuid) {
+        return Optional.ofNullable(uuid)
+                .map(UUID::toString)
+                .orElse(null);
     }
 
 }

@@ -16,6 +16,8 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Adaptador de persistencia para misiones de drones
+ *
+ * Maneja conversiones String (dominio) ↔ UUID (repositorio)
  */
 @Slf4j
 @Component
@@ -44,9 +46,9 @@ public class DroneMissionPersistenceAdapter implements DroneMissionRepository {
     }
 
     @Override
-    public CompletableFuture<Optional<DroneMission>> findById(UUID id) {
+    public CompletableFuture<Optional<DroneMission>> findById(String id) {
         return toCompletableFuture(
-                r2dbcRepository.findById(id)
+                r2dbcRepository.findById(UUID.fromString(id))  // ✅ Convertir String → UUID
                         .timeout(DEFAULT_TIMEOUT)
                         .map(DroneMissionMapper.toDomain)
                         .map(Optional::of)

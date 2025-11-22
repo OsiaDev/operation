@@ -7,10 +7,12 @@ import java.util.UUID;
 /**
  * Entidad de dominio que representa una orden de misión
  * Registra quién creó/aprobó la misión
+ *
+ * Usa String para IDs para mantener independencia de la capa de persistencia
  */
 public record MissionOrder(
-        UUID id,
-        UUID missionId,
+        String id,
+        String missionId,
         String commanderName,
         LocalDateTime createdAt,
         LocalDateTime decisionAt
@@ -43,9 +45,9 @@ public record MissionOrder(
      * @param commanderName Nombre del comandante que crea la misión
      * @return Nueva instancia de MissionOrder
      */
-    public static MissionOrder create(UUID missionId, String commanderName) {
+    public static MissionOrder create(String missionId, String commanderName) {
         return new MissionOrder(
-                UUID.randomUUID(),
+                UUID.randomUUID().toString(),
                 missionId,
                 commanderName,
                 LocalDateTime.now(),

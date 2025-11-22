@@ -16,6 +16,8 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Adaptador de persistencia para órdenes de misión
+ *
+ * Maneja conversiones String (dominio) ↔ UUID (repositorio)
  */
 @Slf4j
 @Component
@@ -44,9 +46,9 @@ public class MissionOrderPersistenceAdapter implements MissionOrderRepository {
     }
 
     @Override
-    public CompletableFuture<Optional<MissionOrder>> findById(UUID id) {
+    public CompletableFuture<Optional<MissionOrder>> findById(String id) {
         return toCompletableFuture(
-                r2dbcRepository.findById(id)
+                r2dbcRepository.findById(UUID.fromString(id))  // ✅ Convertir String → UUID
                         .timeout(DEFAULT_TIMEOUT)
                         .map(MissionOrderMapper.toDomain)
                         .map(Optional::of)

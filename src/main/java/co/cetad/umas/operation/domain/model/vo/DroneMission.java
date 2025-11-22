@@ -10,13 +10,15 @@ import java.util.UUID;
 /**
  * Entidad de dominio que representa una misión de dron
  * Una misión es una orden de vuelo asignada a un dron específico
+ *
+ * Usa String para IDs para mantener independencia de la capa de persistencia
  */
 public record DroneMission(
-        UUID id,
+        String id,
         String name,
-        UUID droneId,
-        UUID routeId,
-        UUID operatorId,
+        String droneId,
+        String routeId,
+        String operatorId,
         MissionOrigin missionType,
         MissionState state,
         LocalDateTime startDate,
@@ -36,6 +38,16 @@ public record DroneMission(
         Objects.requireNonNull(startDate, "Start date cannot be null");
         Objects.requireNonNull(createdAt, "Created at cannot be null");
         Objects.requireNonNull(updatedAt, "Updated at cannot be null");
+
+        if (id.isBlank()) {
+            throw new IllegalArgumentException("Mission ID cannot be empty");
+        }
+        if (droneId.isBlank()) {
+            throw new IllegalArgumentException("Drone ID cannot be empty");
+        }
+        if (operatorId.isBlank()) {
+            throw new IllegalArgumentException("Operator ID cannot be empty");
+        }
     }
 
     /**
@@ -52,14 +64,14 @@ public record DroneMission(
      */
     public static DroneMission createManual(
             String name,
-            UUID droneId,
-            UUID routeId,
-            UUID operatorId,
+            String droneId,
+            String routeId,
+            String operatorId,
             LocalDateTime startDate
     ) {
         LocalDateTime now = LocalDateTime.now();
         return new DroneMission(
-                UUID.randomUUID(),
+                UUID.randomUUID().toString(),
                 name,
                 droneId,
                 routeId,
@@ -82,13 +94,13 @@ public record DroneMission(
      * @return Nueva instancia de DroneMission automática
      */
     public static DroneMission createAutomatic(
-            UUID droneId,
-            UUID operatorId,
+            String droneId,
+            String operatorId,
             LocalDateTime startDate
     ) {
         LocalDateTime now = LocalDateTime.now();
         return new DroneMission(
-                UUID.randomUUID(),
+                UUID.randomUUID().toString(),
                 "Misión Automática",
                 droneId,
                 null,
@@ -105,7 +117,7 @@ public record DroneMission(
      * Verifica si la misión tiene una ruta asignada
      */
     public boolean hasRoute() {
-        return routeId != null;
+        return routeId != null && !routeId.isBlank();
     }
 
     /**
@@ -177,7 +189,7 @@ public record DroneMission(
     /**
      * Crea una copia de la misión con una nueva ruta asignada
      */
-    public DroneMission withRoute(UUID newRouteId) {
+    public DroneMission withRoute(String newRouteId) {
         return new DroneMission(
                 id, name, droneId, newRouteId, operatorId,
                 missionType, state, startDate, createdAt,

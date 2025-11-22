@@ -19,6 +19,6 @@ public interface DroneMissionRepository {
     /**
      * Busca una misión por ID
      */
-    CompletableFuture<Optional<DroneMission>> findById(UUID id);
+    CompletableFuture<Optional<DroneMission>> findById(String id);
 
 }
