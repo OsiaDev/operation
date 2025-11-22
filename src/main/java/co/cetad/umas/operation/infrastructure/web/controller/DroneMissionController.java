@@ -1,8 +1,10 @@
 package co.cetad.umas.operation.infrastructure.web.controller;
 
+import co.cetad.umas.operation.domain.model.dto.ApproveMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.CreateMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.MissionResponse;
 import co.cetad.umas.operation.domain.model.vo.DroneMission;
+import co.cetad.umas.operation.domain.ports.in.ApproveMissionUseCase;
 import co.cetad.umas.operation.domain.ports.in.CreateDroneMissionUseCase;
 import co.cetad.umas.operation.infrastructure.web.mapper.MissionResponseMapper;
 import jakarta.validation.Valid;
@@ -18,7 +20,8 @@ import reactor.core.publisher.Mono;
  * Controller REST para misiones de drones
  *
  * Endpoints:
- * - POST /api/missions - Crear nueva misión manual
+ * - POST /api/v1/missions - Crear nueva misión manual
+ * - POST /api/v1/missions/{id}/approve - Aprobar misión
  */
 @Slf4j
 @RestController
@@ -27,11 +30,12 @@ import reactor.core.publisher.Mono;
 public class DroneMissionController {
 
     private final CreateDroneMissionUseCase createMissionUseCase;
+    private final ApproveMissionUseCase approveMissionUseCase;
 
     /**
      * Crea una nueva misión manual
      *
-     * POST /api/missions
+     * POST /api/v1/missions
      *
      * Body:
      * {
@@ -50,7 +54,7 @@ public class DroneMissionController {
     public Mono<ResponseEntity<MissionResponse>> createMission(
             @Valid @RequestBody CreateMissionRequest request
     ) {
-        log.info("POST /api/missions - Creating mission for drone: {} by commander: {}",
+        log.info("POST /api/v1/missions - Creating mission for drone: {} by commander: {}",
                 request.droneId(), request.commanderName());
 
         return Mono.fromFuture(
@@ -67,7 +71,46 @@ public class DroneMissionController {
                 .doOnError(error ->
                         log.error("❌ Error creating mission for drone: {}",
                                 request.droneId(), error))
-                .onErrorResume(this::handleError);
+                .onErrorResume(this::handleCreateError);
+    }
+
+    /**
+     * Aprueba una misión existente
+     *
+     * POST /api/v1/missions/{id}/approve
+     *
+     * Body:
+     * {
+     *   "commanderName": "María García"
+     * }
+     *
+     * @param id ID de la misión a aprobar (UUID como String)
+     * @param request Request con el nombre del comandante que aprueba
+     * @return Misión aprobada con estado APROBADA
+     */
+    @PostMapping(
+            value = "/{id}/approve",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public Mono<ResponseEntity<MissionResponse>> approveMission(
+            @PathVariable String id,
+            @Valid @RequestBody ApproveMissionRequest request
+    ) {
+        log.info("POST /api/v1/missions/{}/approve - Approving mission by commander: {}",
+                id, request.commanderName());
+
+        return Mono.fromFuture(
+                        approveMissionUseCase.approveMission(id, request.commanderName())
+                )
+                .map(MissionResponseMapper.toResponse)
+                .map(ResponseEntity::ok)
+                .doOnSuccess(response ->
+                        log.info("✅ Mission approved successfully: {} by commander: {}",
+                                extractResponseId(response), request.commanderName()))
+                .doOnError(error ->
+                        log.error("❌ Error approving mission: {}", id, error))
+                .onErrorResume(error -> handleApproveError(error, id));
     }
 
     /**
@@ -94,9 +137,9 @@ public class DroneMissionController {
     }
 
     /**
-     * Maneja errores de forma centralizada con pattern matching
+     * Maneja errores de creación de misión con pattern matching
      */
-    private Mono<ResponseEntity<MissionResponse>> handleError(Throwable error) {
+    private Mono<ResponseEntity<MissionResponse>> handleCreateError(Throwable error) {
         return switch (error) {
             case IllegalArgumentException e -> {
                 log.warn("⚠️ Invalid request: {}", e.getMessage());
@@ -108,6 +151,30 @@ public class DroneMissionController {
             }
             default -> {
                 log.error("❌ Unexpected error creating mission", error);
+                yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
+            }
+        };
+    }
+
+    /**
+     * Maneja errores de aprobación de misión con pattern matching
+     */
+    private Mono<ResponseEntity<MissionResponse>> handleApproveError(Throwable error, String missionId) {
+        return switch (error) {
+            case IllegalArgumentException e -> {
+                log.warn("⚠️ Invalid request for mission {}: {}", missionId, e.getMessage());
+                yield Mono.just(ResponseEntity.badRequest().build());
+            }
+            case co.cetad.umas.operation.application.service.ApproveMissionService.MissionNotFoundException e -> {
+                log.warn("⚠️ Mission not found: {}", missionId);
+                yield Mono.just(ResponseEntity.notFound().build());
+            }
+            case co.cetad.umas.operation.application.service.ApproveMissionService.InvalidMissionStateException e -> {
+                log.warn("⚠️ Invalid mission state for approval: {}", missionId);
+                yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
+            }
+            default -> {
+                log.error("❌ Unexpected error approving mission: {}", missionId, error);
                 yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
             }
         };

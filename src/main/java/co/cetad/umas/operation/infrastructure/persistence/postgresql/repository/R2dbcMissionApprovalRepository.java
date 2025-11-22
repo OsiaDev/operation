@@ -1,0 +1,18 @@
+package co.cetad.umas.operation.infrastructure.persistence.postgresql.repository;
+
+import co.cetad.umas.operation.domain.model.entity.MissionApprovalEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.UUID;
+
+/**
+ * Repositorio reactivo R2DBC para aprobaciones de misión
+ *
+ * IMPORTANTE: Usa UUID como tipo de ID porque la entidad usa UUID
+ * El dominio usa String, pero la conversión se hace en el mapper
+ */
+@Repository
+public interface R2dbcMissionApprovalRepository extends JpaRepository<MissionApprovalEntity, UUID> {
+
+}
