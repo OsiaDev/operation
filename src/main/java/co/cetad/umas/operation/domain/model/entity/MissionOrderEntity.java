@@ -1,14 +1,13 @@
 package co.cetad.umas.operation.domain.model.entity;
 
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.data.domain.Persistable;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.UUID;
-
-import lombok.Getter;
-import lombok.Setter;
-import org.springframework.data.domain.Persistable;
 
 @Getter
 @Setter
@@ -18,7 +17,7 @@ public class MissionOrderEntity implements Serializable, Persistable<UUID> {
 
     @Id
     @Column(name = "id")
-    private UUID id =  UUID.randomUUID();
+    private UUID id = UUID.randomUUID();
 
     @Column(name = "mission_id")
     private UUID missionId;
@@ -34,5 +33,10 @@ public class MissionOrderEntity implements Serializable, Persistable<UUID> {
 
     @Transient
     private boolean isNew = false;
+
+    @Override
+    public boolean isNew() {
+        return isNew;
+    }
 
 }

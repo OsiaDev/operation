@@ -6,17 +6,18 @@ spring:
   application:
     name: umas-operation-service
 
-  r2dbc:
-    host: ${DB_HOST:localhost}
-    port: ${DB_PORT:5432}
-    database: ${DB_NAME:umas_db}
+  # ===== JPA / DATASOURCE CONFIGURATION =====
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:umas_db}
     username: ${DB_USER:umas_user}
     password: ${DB_PASS:umas_pass}
-    pool:
-      initial-size: 10
-      max-size: 20
-      max-idle-time: 30m
-      validation-query: SELECT 1
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 10
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
 
   kafka:
     consumer:

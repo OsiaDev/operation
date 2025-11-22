@@ -13,11 +13,11 @@ import java.util.UUID;
 @Setter
 @Entity
 @Table(name = "drone_telemetry")
-public class DroneTelemetryEntity implements Serializable, Persistable<String> {
+public class DroneTelemetryEntity implements Serializable, Persistable<UUID> {
 
     @Id
     @Column(name = "id")
-    private UUID id =  UUID.randomUUID();
+    private UUID id = UUID.randomUUID();
 
     @Column(name = "vehicle_id")
     private String vehicleId;
@@ -64,5 +64,10 @@ public class DroneTelemetryEntity implements Serializable, Persistable<String> {
     // Control persistencia
     @Transient
     private boolean isNew;
+
+    @Override
+    public boolean isNew() {
+        return isNew;
+    }
 
 }

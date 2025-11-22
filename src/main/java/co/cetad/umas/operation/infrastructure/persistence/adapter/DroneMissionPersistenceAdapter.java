@@ -6,16 +6,17 @@ import co.cetad.umas.operation.infrastructure.persistence.mapper.DroneMissionMap
 import co.cetad.umas.operation.infrastructure.persistence.postgresql.repository.R2dbcDroneMissionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Mono;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Adaptador de persistencia para misiones de drones
+ * Adaptador de persistencia para misiones de drones usando JPA
+ * Mantiene la interfaz asíncrona con CompletableFuture
  *
  * Maneja conversiones String (dominio) ↔ UUID (repositorio)
  */
@@ -24,57 +25,42 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class DroneMissionPersistenceAdapter implements DroneMissionRepository {
 
-    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
-    private final R2dbcDroneMissionRepository r2dbcRepository;
+    private final R2dbcDroneMissionRepository repository;
 
     @Override
+    @Async
+    @Transactional
     public CompletableFuture<DroneMission> save(DroneMission mission) {
-        return toCompletableFuture(
-                Mono.just(mission)
-                        .map(DroneMissionMapper.toEntity)
-                        .flatMap(r2dbcRepository::save)
-                        .timeout(DEFAULT_TIMEOUT)
-                        .map(DroneMissionMapper.toDomain)
-                        .doOnSuccess(saved ->
-                                log.info("✅ Saved mission: {} for drone: {}",
-                                        saved.id(), saved.droneId()))
-                        .doOnError(error ->
-                                log.error("❌ Error saving mission for drone: {}",
-                                        mission.droneId(), error)),
-                () -> "Failed to save mission for drone: " + mission.droneId()
-        );
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                var entity = DroneMissionMapper.toEntity.apply(mission);
+                var saved = repository.save(entity);
+
+                log.info("✅ Saved mission: {} for drone: {}",
+                        saved.getId(), saved.getDroneId());
+
+                return DroneMissionMapper.toDomain.apply(saved);
+            } catch (Exception e) {
+                log.error("❌ Error saving mission for drone: {}", mission.droneId(), e);
+                throw new DatabaseOperationException(
+                        "Failed to save mission for drone: " + mission.droneId(), e);
+            }
+        });
     }
 
     @Override
+    @Async
+    @Transactional(readOnly = true)
     public CompletableFuture<Optional<DroneMission>> findById(String id) {
-        return toCompletableFuture(
-                r2dbcRepository.findById(UUID.fromString(id))  // ✅ Convertir String → UUID
-                        .timeout(DEFAULT_TIMEOUT)
-                        .map(DroneMissionMapper.toDomain)
-                        .map(Optional::of)
-                        .defaultIfEmpty(Optional.empty()),
-                () -> "Failed to find mission by id: " + id
-        );
-    }
-
-    private <T> CompletableFuture<T> toCompletableFuture(
-            Mono<T> mono,
-            ErrorMessageSupplier errorMessageSupplier
-    ) {
-        return mono.toFuture()
-                .handle((result, throwable) -> {
-                    if (throwable != null) {
-                        String errorMessage = errorMessageSupplier.get();
-                        log.error(errorMessage, throwable);
-                        throw new DatabaseOperationException(errorMessage, throwable);
-                    }
-                    return result;
-                });
-    }
-
-    @FunctionalInterface
-    private interface ErrorMessageSupplier {
-        String get();
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return repository.findById(UUID.fromString(id))
+                        .map(DroneMissionMapper.toDomain);
+            } catch (Exception e) {
+                log.error("❌ Error finding mission by id: {}", id, e);
+                return Optional.empty();
+            }
+        });
     }
 
     public static class DatabaseOperationException extends RuntimeException {
