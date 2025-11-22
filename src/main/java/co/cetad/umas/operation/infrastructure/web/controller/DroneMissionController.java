@@ -2,10 +2,12 @@ package co.cetad.umas.operation.infrastructure.web.controller;
 
 import co.cetad.umas.operation.domain.model.dto.ApproveMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.CreateMissionRequest;
+import co.cetad.umas.operation.domain.model.dto.ExecuteMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.MissionResponse;
 import co.cetad.umas.operation.domain.model.vo.DroneMission;
 import co.cetad.umas.operation.domain.ports.in.ApproveMissionUseCase;
 import co.cetad.umas.operation.domain.ports.in.CreateDroneMissionUseCase;
+import co.cetad.umas.operation.domain.ports.in.ExecuteMissionUseCase;
 import co.cetad.umas.operation.infrastructure.web.mapper.MissionResponseMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ import reactor.core.publisher.Mono;
  * Endpoints:
  * - POST /api/v1/missions - Crear nueva misión manual
  * - POST /api/v1/missions/{id}/approve - Aprobar misión
+ * - POST /api/v1/missions/{id}/execute - Ejecutar misión
  */
 @Slf4j
 @RestController
@@ -31,6 +34,7 @@ public class DroneMissionController {
 
     private final CreateDroneMissionUseCase createMissionUseCase;
     private final ApproveMissionUseCase approveMissionUseCase;
+    private final ExecuteMissionUseCase executeMissionUseCase;
 
     /**
      * Crea una nueva misión manual
@@ -114,6 +118,45 @@ public class DroneMissionController {
     }
 
     /**
+     * Ejecuta una misión aprobada
+     *
+     * POST /api/v1/missions/{id}/execute
+     *
+     * Body:
+     * {
+     *   "commanderName": "Carlos Rodríguez"
+     * }
+     *
+     * @param id ID de la misión a ejecutar (UUID como String)
+     * @param request Request con el nombre del comandante que autoriza la ejecución
+     * @return Misión en ejecución con estado EN_EJECUCION
+     */
+    @PostMapping(
+            value = "/{id}/execute",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public Mono<ResponseEntity<MissionResponse>> executeMission(
+            @PathVariable String id,
+            @Valid @RequestBody ExecuteMissionRequest request
+    ) {
+        log.info("POST /api/v1/missions/{}/execute - Executing mission by commander: {}",
+                id, request.commanderName());
+
+        return Mono.fromFuture(
+                        executeMissionUseCase.executeMission(id, request.commanderName())
+                )
+                .map(MissionResponseMapper.toResponse)
+                .map(ResponseEntity::ok)
+                .doOnSuccess(response ->
+                        log.info("✅ Mission executed successfully: {} by commander: {}",
+                                extractResponseId(response), request.commanderName()))
+                .doOnError(error ->
+                        log.error("❌ Error executing mission: {}", id, error))
+                .onErrorResume(error -> handleExecuteError(error, id));
+    }
+
+    /**
      * Construye la misión desde el request
      * Los IDs ya vienen validados como UUIDs en el CreateMissionRequest
      */
@@ -175,6 +218,34 @@ public class DroneMissionController {
             }
             default -> {
                 log.error("❌ Unexpected error approving mission: {}", missionId, error);
+                yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
+            }
+        };
+    }
+
+    /**
+     * Maneja errores de ejecución de misión con pattern matching
+     */
+    private Mono<ResponseEntity<MissionResponse>> handleExecuteError(Throwable error, String missionId) {
+        return switch (error) {
+            case IllegalArgumentException e -> {
+                log.warn("⚠️ Invalid request for mission {}: {}", missionId, e.getMessage());
+                yield Mono.just(ResponseEntity.badRequest().build());
+            }
+            case co.cetad.umas.operation.application.service.ExecuteMissionService.MissionNotFoundException e -> {
+                log.warn("⚠️ Mission not found: {}", missionId);
+                yield Mono.just(ResponseEntity.notFound().build());
+            }
+            case co.cetad.umas.operation.application.service.ExecuteMissionService.InvalidMissionStateException e -> {
+                log.warn("⚠️ Invalid mission state for execution: {}", missionId);
+                yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
+            }
+            case co.cetad.umas.operation.application.service.ExecuteMissionService.MissionScheduledForFutureException e -> {
+                log.warn("⚠️ Mission scheduled for future: {}", missionId);
+                yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
+            }
+            default -> {
+                log.error("❌ Unexpected error executing mission: {}", missionId, error);
                 yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
             }
         };
