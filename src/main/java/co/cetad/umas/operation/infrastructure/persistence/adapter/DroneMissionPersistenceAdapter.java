@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -59,6 +60,23 @@ public class DroneMissionPersistenceAdapter implements DroneMissionRepository {
             } catch (Exception e) {
                 log.error("❌ Error finding mission by id: {}", id, e);
                 return Optional.empty();
+            }
+        });
+    }
+
+    @Override
+    @Async
+    @Transactional(readOnly = true)
+    public CompletableFuture<List<DroneMission>> findAll() {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return repository.findAll()
+                        .stream()
+                        .map(DroneMissionMapper.toDomain)
+                        .toList();
+            } catch (Exception e) {
+                log.error("❌ Error finding all missions", e);
+                return List.of();
             }
         });
     }

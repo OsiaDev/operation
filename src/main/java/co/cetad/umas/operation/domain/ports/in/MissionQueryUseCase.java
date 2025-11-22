@@ -1,21 +1,16 @@
-package co.cetad.umas.operation.domain.ports.out;
+package co.cetad.umas.operation.domain.ports.in;
 
 import co.cetad.umas.operation.domain.model.vo.DroneMission;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Puerto de salida para persistencia de misiones de drones
+ * Puerto de entrada para consultas de misiones (CQRS - Query Side)
+ * Define operaciones de solo lectura sin modificar el estado
  */
-public interface DroneMissionRepository {
-
-    /**
-     * Guarda una misión de dron
-     */
-    CompletableFuture<DroneMission> save(DroneMission mission);
+public interface MissionQueryUseCase {
 
     /**
      * Busca una misión por ID
