@@ -1,7 +1,7 @@
 package co.cetad.umas.operation.infrastructure.persistence.postgresql.repository;
 
 import co.cetad.umas.operation.domain.model.entity.MissionOrderEntity;
-import org.springframework.data.r2dbc.repository.R2dbcRepository;
+import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.UUID;
@@ -13,6 +13,6 @@ import java.util.UUID;
  * El dominio usa String, pero la conversión se hace en el mapper
  */
 @Repository
-public interface R2dbcMissionOrderRepository extends R2dbcRepository<MissionOrderEntity, UUID> {
+public interface R2dbcMissionOrderRepository extends JpaRepository<MissionOrderEntity, UUID> {
 
 }

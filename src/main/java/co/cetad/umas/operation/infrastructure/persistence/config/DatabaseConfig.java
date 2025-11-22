@@ -15,9 +15,13 @@ import org.springframework.r2dbc.core.DatabaseClient;
 /**
  * Configuración de conexión a PostgreSQL con soporte para tipos ENUM personalizados
  *
- * IMPORTANTE: Registra los tipos ENUM personalizados de PostgreSQL usando EnumCodec
- * para que R2DBC pueda mapear correctamente mission_origin → MissionOrigin y
- * mission_state → MissionState
+ * IMPORTANTE:
+ * - EnumCodec (aquí) maneja la conversión a nivel de driver R2DBC
+ * - R2dbcConvertersConfig maneja la conversión a nivel de Spring Data R2DBC
+ *
+ * Ambos son necesarios para que los ENUMs funcionen correctamente:
+ * - EnumCodec: Permite que el driver R2DBC entienda los tipos ENUM de PostgreSQL
+ * - Converters: Permiten que Spring Data R2DBC convierta entre Java ENUMs y Strings
  */
 @Configuration
 public class DatabaseConfig {

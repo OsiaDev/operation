@@ -1,117 +1,54 @@
 package co.cetad.umas.operation.domain.model.entity;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.annotation.Transient;
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.data.domain.Persistable;
-import org.springframework.data.relational.core.mapping.Column;
-import org.springframework.data.relational.core.mapping.Table;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-/**
- * Entidad de persistencia para misiones de drones
- * Implementa Persistable para controlar INSERT vs UPDATE
- *
- * IMPORTANTE: Los campos de tipo ENUM (mission_type y state) usan converters personalizados
- * definidos en R2dbcConvertersConfig para mapear correctamente a los tipos ENUM de PostgreSQL
- */
-@Table("drone_mission")
-public record DroneMissionEntity(
-        @Id
-        UUID id,
+@Getter
+@Setter
+@Entity
+@Table(name = "drone_mission")
+public class DroneMissionEntity implements  Serializable, Persistable<UUID> {
 
-        @Column("name")
-        String name,
+    @Id
+    @Column(name = "id")
+    private UUID id =  UUID.randomUUID();
 
-        @Column("drone_id")
-        UUID droneId,
+    @Column(name = "name")
+    private String name;
 
-        @Column("route_id")
-        UUID routeId,
+    @Column(name = "drone_id")
+    private UUID droneId;
 
-        @Column("operator_id")
-        UUID operatorId,
+    @Column(name = "route_id")
+    private UUID routeId;
 
-        /**
-         * Tipo ENUM mission_origin en PostgreSQL
-         * Los converters en R2dbcConvertersConfig manejan la conversión String ↔ ENUM
-         */
-        @Column("mission_type")
-        MissionOrigin missionType,
+    @Column(name = "operator_id")
+    private UUID operatorId;
 
-        /**
-         * Tipo ENUM mission_state en PostgreSQL
-         * Los converters en R2dbcConvertersConfig manejan la conversión String ↔ ENUM
-         */
-        @Column("state")
-        MissionState state,
+    @Enumerated(EnumType.STRING)
+    @Column(name = "mission_type")
+    private MissionOrigin missionType;
 
-        @Column("start_date")
-        LocalDateTime startDate,
+    @Enumerated(EnumType.STRING)
+    @Column(name = "state")
+    private MissionState state;
 
-        @Column("created_at")
-        LocalDateTime createdAt,
+    @Column(name = "start_date")
+    private LocalDateTime startDate;
 
-        @Column("updated_at")
-        LocalDateTime updatedAt,
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
 
-        @Transient
-        boolean isNew
-) implements Persistable<UUID> {
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
 
-    /**
-     * Constructor para creación de nuevas entidades (INSERT)
-     */
-    public static DroneMissionEntity create(
-            UUID id,
-            String name,
-            UUID droneId,
-            UUID routeId,
-            UUID operatorId,
-            MissionOrigin missionType,
-            MissionState state,
-            LocalDateTime startDate,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt
-    ) {
-        return new DroneMissionEntity(
-                id, name, droneId, routeId, operatorId,
-                missionType, state, startDate, createdAt, updatedAt,
-                true
-        );
-    }
-
-    /**
-     * Constructor para entidades cargadas desde BD (UPDATE)
-     */
-    public static DroneMissionEntity fromDatabase(
-            UUID id,
-            String name,
-            UUID droneId,
-            UUID routeId,
-            UUID operatorId,
-            MissionOrigin missionType,
-            MissionState state,
-            LocalDateTime startDate,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt
-    ) {
-        return new DroneMissionEntity(
-                id, name, droneId, routeId, operatorId,
-                missionType, state, startDate, createdAt, updatedAt,
-                false
-        );
-    }
-
-    @Override
-    public UUID getId() {
-        return id;
-    }
-
-    @Override
-    public boolean isNew() {
-        return isNew;
-    }
+    @Transient
+    private boolean isNew = false;
 
 }

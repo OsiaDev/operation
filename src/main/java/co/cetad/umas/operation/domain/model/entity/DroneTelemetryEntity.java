@@ -1,155 +1,68 @@
 package co.cetad.umas.operation.domain.model.entity;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.annotation.Transient;
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.data.domain.Persistable;
-import org.springframework.data.relational.core.mapping.Column;
-import org.springframework.data.relational.core.mapping.Table;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
-/**
- * Entidad de persistencia para telemetría de drones
- * Implementa Persistable para controlar el comportamiento de INSERT vs UPDATE
- * ya que generamos UUIDs manualmente en el dominio
- */
-@Table("drone_telemetry")
-public record DroneTelemetryEntity(
-        @Id
-        String id,
+@Getter
+@Setter
+@Entity
+@Table(name = "drone_telemetry")
+public class DroneTelemetryEntity implements Serializable, Persistable<String> {
 
-        @Column("vehicle_id")
-        String vehicleId,
+    @Id
+    @Column(name = "id")
+    private UUID id =  UUID.randomUUID();
 
-        @Column("telemetry_type")
-        String telemetryType,
+    @Column(name = "vehicle_id")
+    private String vehicleId;
 
-        // Ubicación
-        @Column("latitude")
-        Double latitude,
+    @Column(name = "telemetry_type")
+    private String telemetryType;
 
-        @Column("longitude")
-        Double longitude,
+    // Ubicación
+    @Column(name = "latitude")
+    private Double latitude;
 
-        @Column("altitude")
-        Double altitude,
+    @Column(name = "longitude")
+    private Double longitude;
 
-        @Column("accuracy")
-        Double accuracy,
+    @Column(name = "altitude")
+    private Double altitude;
 
-        // Métricas
-        @Column("speed")
-        Double speed,
+    @Column(name = "accuracy")
+    private Double accuracy;
 
-        @Column("heading")
-        Double heading,
+    // Métricas
+    @Column(name = "speed")
+    private Double speed;
 
-        @Column("battery_level")
-        Double batteryLevel,
+    @Column(name = "heading")
+    private Double heading;
 
-        @Column("temperature")
-        Double temperature,
+    @Column(name = "battery_level")
+    private Double batteryLevel;
 
-        @Column("signal_strength")
-        Double signalStrength,
+    @Column(name = "temperature")
+    private Double temperature;
 
-        // Timestamps
-        @Column("timestamp")
-        LocalDateTime timestamp,
+    @Column(name = "signal_strength")
+    private Double signalStrength;
 
-        @Column("created_at")
-        LocalDateTime createdAt,
+    // Timestamps
+    @Column(name = "timestamp")
+    private LocalDateTime timestamp;
 
-        // Flag transient para control de persistencia
-        @Transient
-        boolean isNew
-) implements Persistable<String> {
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
 
-    /**
-     * Constructor para creación de nuevas entidades (INSERT)
-     * Marca la entidad como nueva para forzar INSERT
-     */
-    public static DroneTelemetryEntity create(
-            String id,
-            String vehicleId,
-            String telemetryType,
-            Double latitude,
-            Double longitude,
-            Double altitude,
-            Double accuracy,
-            Double speed,
-            Double heading,
-            Double batteryLevel,
-            Double temperature,
-            Double signalStrength,
-            LocalDateTime timestamp
-    ) {
-        return new DroneTelemetryEntity(
-                id,
-                vehicleId,
-                telemetryType,
-                latitude,
-                longitude,
-                altitude,
-                accuracy,
-                speed,
-                heading,
-                batteryLevel,
-                temperature,
-                signalStrength,
-                timestamp,
-                LocalDateTime.now(),
-                true  // ✅ Marca como nueva para INSERT
-        );
-    }
-
-    /**
-     * Constructor para entidades cargadas desde BD (UPDATE)
-     * Marca la entidad como existente
-     */
-    public static DroneTelemetryEntity fromDatabase(
-            String id,
-            String vehicleId,
-            String telemetryType,
-            Double latitude,
-            Double longitude,
-            Double altitude,
-            Double accuracy,
-            Double speed,
-            Double heading,
-            Double batteryLevel,
-            Double temperature,
-            Double signalStrength,
-            LocalDateTime timestamp,
-            LocalDateTime createdAt
-    ) {
-        return new DroneTelemetryEntity(
-                id,
-                vehicleId,
-                telemetryType,
-                latitude,
-                longitude,
-                altitude,
-                accuracy,
-                speed,
-                heading,
-                batteryLevel,
-                temperature,
-                signalStrength,
-                timestamp,
-                createdAt,
-                false  // ✅ Marca como existente para UPDATE
-        );
-    }
-
-    @Override
-    public String getId() {
-        return id;
-    }
-
-    @Override
-    public boolean isNew() {
-        return isNew;
-    }
+    // Control persistencia
+    @Transient
+    private boolean isNew;
 
 }
