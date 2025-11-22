@@ -22,7 +22,7 @@ import reactor.core.publisher.Mono;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/missions")
+@RequestMapping("/api/v1/missions")
 @RequiredArgsConstructor
 public class DroneMissionController {
 
@@ -53,32 +53,64 @@ public class DroneMissionController {
         log.info("POST /api/missions - Creating mission for drone: {} by commander: {}",
                 request.droneId(), request.commanderName());
 
-        // Convertir los String UUIDs del request a UUIDs
-        DroneMission mission = DroneMission.createManual(
-                request.name(),
-                request.getDroneIdAsUUID(),
-                request.getRouteIdAsUUID(),
-                request.getOperatorIdAsUUID(),
-                request.startDate()
-        );
-
-        return Mono.fromFuture(createMissionUseCase.createMission(mission, request.commanderName()))
+        return Mono.fromFuture(
+                        createMissionUseCase.createMission(
+                                buildMission(request),
+                                request.commanderName()
+                        )
+                )
                 .map(MissionResponseMapper.toResponse)
                 .map(response -> ResponseEntity.status(HttpStatus.CREATED).body(response))
                 .doOnSuccess(response ->
                         log.info("✅ Mission created successfully: {}",
-                                response.getBody() != null ? response.getBody().id() : "unknown"))
+                                extractResponseId(response)))
                 .doOnError(error ->
                         log.error("❌ Error creating mission for drone: {}",
                                 request.droneId(), error))
-                .onErrorResume(IllegalArgumentException.class, error -> {
-                    log.warn("Invalid request: {}", error.getMessage());
-                    return Mono.just(ResponseEntity.badRequest().body(null));
-                })
-                .onErrorResume(Exception.class, error -> {
-                    log.error("Internal error creating mission", error);
-                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null));
-                });
+                .onErrorResume(this::handleError);
+    }
+
+    /**
+     * Construye la misión desde el request
+     * Los IDs ya vienen validados como UUIDs en el CreateMissionRequest
+     */
+    private DroneMission buildMission(CreateMissionRequest request) {
+        return DroneMission.createManual(
+                request.name(),
+                request.droneId(),      // String UUID
+                request.routeId(),      // String UUID (puede ser null)
+                request.operatorId(),   // String UUID
+                request.startDate()
+        );
+    }
+
+    /**
+     * Extrae el ID de la respuesta de forma segura
+     */
+    private String extractResponseId(ResponseEntity<MissionResponse> response) {
+        return response.getBody() != null
+                ? response.getBody().id().toString()
+                : "unknown";
+    }
+
+    /**
+     * Maneja errores de forma centralizada con pattern matching
+     */
+    private Mono<ResponseEntity<MissionResponse>> handleError(Throwable error) {
+        return switch (error) {
+            case IllegalArgumentException e -> {
+                log.warn("⚠️ Invalid request: {}", e.getMessage());
+                yield Mono.just(ResponseEntity.badRequest().build());
+            }
+            case co.cetad.umas.operation.application.service.DroneMissionService.MissionCreationException e -> {
+                log.error("❌ Mission creation failed", e);
+                yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
+            }
+            default -> {
+                log.error("❌ Unexpected error creating mission", error);
+                yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
+            }
+        };
     }
 
 }
