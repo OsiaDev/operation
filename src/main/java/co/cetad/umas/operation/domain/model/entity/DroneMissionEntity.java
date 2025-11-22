@@ -12,6 +12,9 @@ import java.util.UUID;
 /**
  * Entidad de persistencia para misiones de drones
  * Implementa Persistable para controlar INSERT vs UPDATE
+ *
+ * IMPORTANTE: Los campos de tipo ENUM (mission_type y state) usan converters personalizados
+ * definidos en R2dbcConvertersConfig para mapear correctamente a los tipos ENUM de PostgreSQL
  */
 @Table("drone_mission")
 public record DroneMissionEntity(
@@ -30,9 +33,17 @@ public record DroneMissionEntity(
         @Column("operator_id")
         UUID operatorId,
 
+        /**
+         * Tipo ENUM mission_origin en PostgreSQL
+         * Los converters en R2dbcConvertersConfig manejan la conversión String ↔ ENUM
+         */
         @Column("mission_type")
         MissionOrigin missionType,
 
+        /**
+         * Tipo ENUM mission_state en PostgreSQL
+         * Los converters en R2dbcConvertersConfig manejan la conversión String ↔ ENUM
+         */
         @Column("state")
         MissionState state,
 

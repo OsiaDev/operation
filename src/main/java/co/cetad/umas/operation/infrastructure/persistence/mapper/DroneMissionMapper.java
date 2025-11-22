@@ -13,7 +13,9 @@ import java.util.function.Function;
  * Mapper funcional entre el modelo de dominio y la entidad de persistencia
  * Mantiene la separación entre capas de arquitectura hexagonal
  *
- * Maneja conversiones String (dominio) ↔ UUID (persistencia)
+ * Maneja conversiones:
+ * - String (dominio) ↔ UUID (persistencia) para IDs
+ * - MissionOrigin/MissionState (dominio) ↔ String (persistencia) para ENUMs
  */
 public final class DroneMissionMapper {
 
@@ -22,7 +24,12 @@ public final class DroneMissionMapper {
     }
 
     /**
-     * Convierte de dominio (String IDs) a entidad de persistencia (UUID IDs)
+     * Convierte de dominio a entidad de persistencia
+     *
+     * Conversiones:
+     * - String ID → UUID ID
+     * - MissionOrigin enum → String
+     * - MissionState enum → String
      */
     public static final Function<DroneMission, DroneMissionEntity> toEntity = mission ->
             DroneMissionEntity.create(
@@ -31,15 +38,20 @@ public final class DroneMissionMapper {
                     UUID.fromString(mission.droneId()),
                     parseUUID(mission.routeId()),
                     UUID.fromString(mission.operatorId()),
-                    mission.missionType(),
-                    mission.state(),
+                    mission.missionType(),  // ✅ Enum → String
+                    mission.state(),         // ✅ Enum → String
                     mission.startDate(),
                     mission.createdAt(),
                     mission.updatedAt()
             );
 
     /**
-     * Convierte de entidad de persistencia (UUID IDs) a dominio (String IDs)
+     * Convierte de entidad de persistencia a dominio
+     *
+     * Conversiones:
+     * - UUID ID → String ID
+     * - String → MissionOrigin enum
+     * - String → MissionState enum
      */
     public static final Function<DroneMissionEntity, DroneMission> toDomain = entity ->
             new DroneMission(
@@ -48,8 +60,8 @@ public final class DroneMissionMapper {
                     entity.droneId().toString(),
                     formatUUID(entity.routeId()),
                     entity.operatorId().toString(),
-                    entity.missionType(),
-                    entity.state(),
+                    entity.missionType(),  // ✅ String → Enum
+                    entity.state(),          // ✅ String → Enum
                     entity.startDate(),
                     entity.createdAt(),
                     entity.updatedAt()
@@ -72,6 +84,40 @@ public final class DroneMissionMapper {
         return Optional.ofNullable(uuid)
                 .map(UUID::toString)
                 .orElse(null);
+    }
+
+    /**
+     * Convierte String a MissionOrigin enum de forma segura
+     * Retorna AUTOMATICA por defecto si hay error
+     */
+    private static MissionOrigin parseMissionOrigin(String originString) {
+        return Optional.ofNullable(originString)
+                .map(String::toUpperCase)
+                .map(s -> {
+                    try {
+                        return MissionOrigin.valueOf(s);
+                    } catch (IllegalArgumentException e) {
+                        return MissionOrigin.AUTOMATICA;
+                    }
+                })
+                .orElse(MissionOrigin.AUTOMATICA);
+    }
+
+    /**
+     * Convierte String a MissionState enum de forma segura
+     * Retorna PENDIENTE_APROBACION por defecto si hay error
+     */
+    private static MissionState parseMissionState(String stateString) {
+        return Optional.ofNullable(stateString)
+                .map(String::toUpperCase)
+                .map(s -> {
+                    try {
+                        return MissionState.valueOf(s);
+                    } catch (IllegalArgumentException e) {
+                        return MissionState.PENDIENTE_APROBACION;
+                    }
+                })
+                .orElse(MissionState.PENDIENTE_APROBACION);
     }
 
 }
