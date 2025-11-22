@@ -1,5 +1,6 @@
 package co.cetad.umas.operation.application.service;
 
+import co.cetad.umas.operation.domain.model.entity.MissionOrigin;
 import co.cetad.umas.operation.domain.model.vo.DroneMission;
 import co.cetad.umas.operation.domain.ports.in.MissionQueryUseCase;
 import co.cetad.umas.operation.domain.ports.out.DroneMissionRepository;
@@ -47,6 +48,36 @@ public class MissionQueryService implements MissionQueryUseCase {
         return missionRepository.findAll()
                 .exceptionally(throwable -> {
                     log.error("Error querying all missions", throwable);
+                    return List.of();
+                });
+    }
+
+    @Override
+    public CompletableFuture<List<DroneMission>> findAuthorizedMissions() {
+        log.debug("Querying authorized missions (MANUAL)");
+
+        return missionRepository.findByMissionType(MissionOrigin.MANUAL)
+                .thenApply(missions -> {
+                    log.info("Found {} authorized missions", missions.size());
+                    return missions;
+                })
+                .exceptionally(throwable -> {
+                    log.error("Error querying authorized missions", throwable);
+                    return List.of();
+                });
+    }
+
+    @Override
+    public CompletableFuture<List<DroneMission>> findUnauthorizedMissions() {
+        log.debug("Querying unauthorized missions (AUTOMATICA)");
+
+        return missionRepository.findByMissionType(MissionOrigin.AUTOMATICA)
+                .thenApply(missions -> {
+                    log.info("Found {} unauthorized missions", missions.size());
+                    return missions;
+                })
+                .exceptionally(throwable -> {
+                    log.error("Error querying unauthorized missions", throwable);
                     return List.of();
                 });
     }

@@ -18,8 +18,10 @@ import reactor.core.publisher.Mono;
  * Controller REST para consultas de misiones de drones
  *
  * Endpoints:
- * - GET /api/v1/missions           - Listar todas las misiones
- * - GET /api/v1/missions/{id}      - Buscar misión por ID
+ * - GET /api/v1/missions                    - Listar todas las misiones
+ * - GET /api/v1/missions/{id}               - Buscar misión por ID
+ * - GET /api/v1/missions/authorized         - Listar misiones autorizadas (MANUAL)
+ * - GET /api/v1/missions/unauthorized       - Listar misiones no autorizadas (AUTOMATICA)
  *
  * Usa WebFlux para respuestas reactivas
  */
@@ -76,6 +78,59 @@ public class MissionQueryController {
                 )
                 .doOnSuccess(response -> log.info("✅ Found mission with id: {}", id))
                 .doOnError(error -> log.error("❌ Error finding mission with id: {}", id, error));
+    }
+
+    /**
+     * Lista todas las misiones autorizadas (creadas manualmente)
+     *
+     * GET /api/v1/missions/authorized
+     *
+     * Retorna misiones con missionType = MANUAL
+     * Estas son misiones creadas por usuarios/comandantes en la interfaz
+     */
+    @GetMapping(value = "/authorized", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Flux<MissionResponse> findAuthorizedMissions() {
+        log.info("GET /api/v1/missions/authorized - Listing authorized missions");
+
+        return Mono.fromFuture(missionQueryUseCase.findAuthorizedMissions())
+                .flatMapMany(Flux::fromIterable)
+                .map(MissionResponseMapper.toResponse)
+                .doOnComplete(() -> log.info("✅ Completed listing authorized missions"))
+                .doOnError(error -> {
+                    log.error("❌ Error listing authorized missions", error);
+                    throw new ResponseStatusException(
+                            HttpStatus.INTERNAL_SERVER_ERROR,
+                            "Error listing authorized missions: " + error.getMessage(),
+                            error
+                    );
+                });
+    }
+
+    /**
+     * Lista todas las misiones no autorizadas (creadas automáticamente)
+     *
+     * GET /api/v1/missions/unauthorized
+     *
+     * Retorna misiones con missionType = AUTOMATICA
+     * Estas son misiones creadas automáticamente por telemetría cuando
+     * un dron vuela sin misión asignada
+     */
+    @GetMapping(value = "/unauthorized", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Flux<MissionResponse> findUnauthorizedMissions() {
+        log.info("GET /api/v1/missions/unauthorized - Listing unauthorized missions");
+
+        return Mono.fromFuture(missionQueryUseCase.findUnauthorizedMissions())
+                .flatMapMany(Flux::fromIterable)
+                .map(MissionResponseMapper.toResponse)
+                .doOnComplete(() -> log.info("✅ Completed listing unauthorized missions"))
+                .doOnError(error -> {
+                    log.error("❌ Error listing unauthorized missions", error);
+                    throw new ResponseStatusException(
+                            HttpStatus.INTERNAL_SERVER_ERROR,
+                            "Error listing unauthorized missions: " + error.getMessage(),
+                            error
+                    );
+                });
     }
 
     /**

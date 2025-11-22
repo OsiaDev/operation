@@ -22,4 +22,16 @@ public interface MissionQueryUseCase {
      */
     CompletableFuture<List<DroneMission>> findAll();
 
+    /**
+     * Busca todas las misiones autorizadas (missionType = MANUAL)
+     * Las misiones autorizadas son aquellas creadas manualmente por usuarios/comandantes
+     */
+    CompletableFuture<List<DroneMission>> findAuthorizedMissions();
+
+    /**
+     * Busca todas las misiones no autorizadas (missionType = AUTOMATICA)
+     * Las misiones no autorizadas son aquellas creadas automáticamente por telemetría
+     */
+    CompletableFuture<List<DroneMission>> findUnauthorizedMissions();
+
 }

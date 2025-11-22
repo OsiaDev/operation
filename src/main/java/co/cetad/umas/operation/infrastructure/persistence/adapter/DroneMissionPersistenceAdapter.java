@@ -1,5 +1,6 @@
 package co.cetad.umas.operation.infrastructure.persistence.adapter;
 
+import co.cetad.umas.operation.domain.model.entity.MissionOrigin;
 import co.cetad.umas.operation.domain.model.vo.DroneMission;
 import co.cetad.umas.operation.domain.ports.out.DroneMissionRepository;
 import co.cetad.umas.operation.infrastructure.persistence.mapper.DroneMissionMapper;
@@ -76,6 +77,28 @@ public class DroneMissionPersistenceAdapter implements DroneMissionRepository {
                         .toList();
             } catch (Exception e) {
                 log.error("❌ Error finding all missions", e);
+                return List.of();
+            }
+        });
+    }
+
+    @Override
+    @Async
+    @Transactional(readOnly = true)
+    public CompletableFuture<List<DroneMission>> findByMissionType(MissionOrigin missionType) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                log.debug("Querying missions by type: {}", missionType);
+
+                List<DroneMission> missions = repository.findByMissionType(missionType)
+                        .stream()
+                        .map(DroneMissionMapper.toDomain)
+                        .toList();
+
+                log.info("✅ Found {} missions with type: {}", missions.size(), missionType);
+                return missions;
+            } catch (Exception e) {
+                log.error("❌ Error finding missions by type: {}", missionType, e);
                 return List.of();
             }
         });

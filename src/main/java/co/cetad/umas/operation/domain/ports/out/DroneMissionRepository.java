@@ -1,10 +1,10 @@
 package co.cetad.umas.operation.domain.ports.out;
 
+import co.cetad.umas.operation.domain.model.entity.MissionOrigin;
 import co.cetad.umas.operation.domain.model.vo.DroneMission;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -26,5 +26,10 @@ public interface DroneMissionRepository {
      * Busca todas las misiones
      */
     CompletableFuture<List<DroneMission>> findAll();
+
+    /**
+     * Busca todas las misiones por tipo (MANUAL o AUTOMATICA)
+     */
+    CompletableFuture<List<DroneMission>> findByMissionType(MissionOrigin missionType);
 
 }
