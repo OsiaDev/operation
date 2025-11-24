@@ -63,7 +63,8 @@ public final class DroneMissionMapper {
                     entity.getState(),
                     entity.getStartDate(),
                     entity.getCreatedAt(),
-                    entity.getUpdatedAt()
+                    entity.getUpdatedAt(),
+                    entity.isNew()
             );
 
 }

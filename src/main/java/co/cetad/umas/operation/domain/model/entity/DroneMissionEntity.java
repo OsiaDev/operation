@@ -3,6 +3,8 @@ package co.cetad.umas.operation.domain.model.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.springframework.data.domain.Persistable;
 
 import java.io.Serializable;
@@ -32,11 +34,13 @@ public class DroneMissionEntity implements Serializable, Persistable<UUID> {
     private UUID operatorId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "mission_type")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "mission_type", columnDefinition = "mission_origin")
     private MissionOrigin missionType;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "state")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "state", columnDefinition = "mission_state")
     private MissionState state;
 
     @Column(name = "start_date")

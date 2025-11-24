@@ -23,7 +23,9 @@ public record DroneMission(
         MissionState state,
         LocalDateTime startDate,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+
+        Boolean isNew
 ) {
 
     /**
@@ -80,7 +82,8 @@ public record DroneMission(
                 MissionState.PENDIENTE_APROBACION,
                 startDate,
                 now,
-                now
+                now,
+                true
         );
     }
 
@@ -109,7 +112,8 @@ public record DroneMission(
                 MissionState.EN_EJECUCION,
                 startDate,
                 now,
-                now
+                now,
+                true
         );
     }
 
@@ -193,7 +197,7 @@ public record DroneMission(
         return new DroneMission(
                 id, name, droneId, newRouteId, operatorId,
                 missionType, state, startDate, createdAt,
-                LocalDateTime.now()
+                LocalDateTime.now(), isNew
         );
     }
 
@@ -204,7 +208,7 @@ public record DroneMission(
         return new DroneMission(
                 id, newName, droneId, routeId, operatorId,
                 missionType, state, startDate, createdAt,
-                LocalDateTime.now()
+                LocalDateTime.now(), isNew
         );
     }
 
@@ -216,7 +220,7 @@ public record DroneMission(
         return new DroneMission(
                 id, name, droneId, routeId, operatorId,
                 missionType, state, newStartDate, createdAt,
-                LocalDateTime.now()
+                LocalDateTime.now(), isNew
         );
     }
 
@@ -228,7 +232,7 @@ public record DroneMission(
         return new DroneMission(
                 id, name, droneId, routeId, operatorId,
                 missionType, newState, startDate, createdAt,
-                LocalDateTime.now()
+                LocalDateTime.now(), isNew
         );
     }
 

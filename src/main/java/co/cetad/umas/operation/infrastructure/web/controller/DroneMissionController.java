@@ -96,7 +96,7 @@ public class DroneMissionController {
      * @return Misión aprobada con estado APROBADA
      */
     @PostMapping(
-            value = "/{id}/approve",
+            value = "/approve/{id}",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
