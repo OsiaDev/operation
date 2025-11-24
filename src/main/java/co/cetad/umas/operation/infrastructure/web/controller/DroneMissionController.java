@@ -1,5 +1,8 @@
 package co.cetad.umas.operation.infrastructure.web.controller;
 
+import co.cetad.umas.operation.application.service.ApproveMissionService;
+import co.cetad.umas.operation.application.service.DroneMissionService;
+import co.cetad.umas.operation.application.service.ExecuteMissionService;
 import co.cetad.umas.operation.domain.model.dto.ApproveMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.CreateMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.ExecuteMissionRequest;
@@ -24,7 +27,7 @@ import reactor.core.publisher.Mono;
  * Endpoints:
  * - POST /api/v1/missions - Crear nueva misión manual
  * - POST /api/v1/missions/{id}/approve - Aprobar misión
- * - POST /api/v1/missions/{id}/execute - Ejecutar misión
+ * - POST /api/v1/missions/{id}/execute - Ejecutar misión (envía waypoints a Kafka)
  */
 @Slf4j
 @RestController
@@ -119,6 +122,7 @@ public class DroneMissionController {
 
     /**
      * Ejecuta una misión aprobada
+     * Busca la ruta asociada, extrae los waypoints del GeoJSON y los envía a Kafka
      *
      * POST /api/v1/missions/{id}/execute
      *
@@ -188,7 +192,7 @@ public class DroneMissionController {
                 log.warn("⚠️ Invalid request: {}", e.getMessage());
                 yield Mono.just(ResponseEntity.badRequest().build());
             }
-            case co.cetad.umas.operation.application.service.DroneMissionService.MissionCreationException e -> {
+            case DroneMissionService.MissionCreationException e -> {
                 log.error("❌ Mission creation failed", e);
                 yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
             }
@@ -208,11 +212,11 @@ public class DroneMissionController {
                 log.warn("⚠️ Invalid request for mission {}: {}", missionId, e.getMessage());
                 yield Mono.just(ResponseEntity.badRequest().build());
             }
-            case co.cetad.umas.operation.application.service.ApproveMissionService.MissionNotFoundException e -> {
+            case ApproveMissionService.MissionNotFoundException e -> {
                 log.warn("⚠️ Mission not found: {}", missionId);
                 yield Mono.just(ResponseEntity.notFound().build());
             }
-            case co.cetad.umas.operation.application.service.ApproveMissionService.InvalidMissionStateException e -> {
+            case ApproveMissionService.InvalidMissionStateException e -> {
                 log.warn("⚠️ Invalid mission state for approval: {}", missionId);
                 yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
             }
@@ -225,6 +229,7 @@ public class DroneMissionController {
 
     /**
      * Maneja errores de ejecución de misión con pattern matching
+     * Incluye nuevas excepciones de validación de ruta y publicación a Kafka
      */
     private Mono<ResponseEntity<MissionResponse>> handleExecuteError(Throwable error, String missionId) {
         return switch (error) {
@@ -232,17 +237,41 @@ public class DroneMissionController {
                 log.warn("⚠️ Invalid request for mission {}: {}", missionId, e.getMessage());
                 yield Mono.just(ResponseEntity.badRequest().build());
             }
-            case co.cetad.umas.operation.application.service.ExecuteMissionService.MissionNotFoundException e -> {
+            case ExecuteMissionService.MissionNotFoundException e -> {
                 log.warn("⚠️ Mission not found: {}", missionId);
                 yield Mono.just(ResponseEntity.notFound().build());
             }
-            case co.cetad.umas.operation.application.service.ExecuteMissionService.InvalidMissionStateException e -> {
+            case ExecuteMissionService.DroneNotFoundException e -> {
+                log.warn("⚠️ Drone not found for mission: {}", missionId);
+                yield Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND).build());
+            }
+            case ExecuteMissionService.RouteNotFoundException e -> {
+                log.warn("⚠️ Route not found for mission: {}", missionId);
+                yield Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND).build());
+            }
+            case ExecuteMissionService.InvalidMissionStateException e -> {
                 log.warn("⚠️ Invalid mission state for execution: {}", missionId);
                 yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
             }
-            case co.cetad.umas.operation.application.service.ExecuteMissionService.MissionScheduledForFutureException e -> {
+            case ExecuteMissionService.MissionScheduledForFutureException e -> {
                 log.warn("⚠️ Mission scheduled for future: {}", missionId);
                 yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
+            }
+            case ExecuteMissionService.MissingRouteException e -> {
+                log.warn("⚠️ Mission has no route assigned: {}", missionId);
+                yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
+            }
+            case ExecuteMissionService.InvalidRouteException e -> {
+                log.warn("⚠️ Invalid route for mission: {}", missionId);
+                yield Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).build());
+            }
+            case ExecuteMissionService.RouteParsingException e -> {
+                log.error("❌ Error parsing route GeoJSON for mission: {}", missionId, e);
+                yield Mono.just(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).build());
+            }
+            case ExecuteMissionService.CommandPublishException e -> {
+                log.error("❌ Error publishing execution command for mission: {}", missionId, e);
+                yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
             }
             default -> {
                 log.error("❌ Unexpected error executing mission: {}", missionId, error);

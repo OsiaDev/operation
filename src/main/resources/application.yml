@@ -62,6 +62,12 @@ spring:
       properties:
         enable.idempotence: true
 
+# ===== KAFKA TOPICS =====
+kafka:
+  topics:
+    telemetry: umas.drone.telemetry
+    execute: umas.drone.execute
+
 # ===== MANAGEMENT / ACTUATOR =====
 management:
   endpoints:
