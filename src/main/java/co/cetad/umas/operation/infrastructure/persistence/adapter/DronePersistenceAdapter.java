@@ -6,7 +6,7 @@ import co.cetad.umas.operation.infrastructure.persistence.mapper.DroneMapper;
 import co.cetad.umas.operation.infrastructure.persistence.postgresql.repository.R2dbcDroneRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
@@ -16,6 +16,14 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * Adaptador de persistencia para drones usando JPA
+ * Mantiene la interfaz asíncrona con CompletableFuture
+ *
+ * Cache configurado SOLO para drones:
+ * - findByVehicleId: Cacheable (evita consultas repetidas)
+ * - save: CachePut (actualiza cache después de guardar)
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -23,17 +31,21 @@ public class DronePersistenceAdapter implements DroneRepository {
 
     private final R2dbcDroneRepository repository;
 
+    /**
+     * Guarda un dron y actualiza el cache
+     * @CachePut asegura que el cache se actualice con el nuevo valor
+     */
     @Override
     @Async
     @Transactional
-    @CacheEvict(value = {"drones", "dronesByVehicleId", "droneExists"}, allEntries = true)
+    @CachePut(value = "droneCache", key = "#drone.vehicleId")
     public CompletableFuture<Drone> save(Drone drone) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 var entity = DroneMapper.toEntity.apply(drone);
                 var saved = repository.save(entity);
 
-                log.info("✅ Saved drone: {} with vehicleId: {} [cache invalidated]",
+                log.info("✅ Saved drone: {} with vehicleId: {} (cache updated)",
                         saved.getId(), saved.getVehicleId());
 
                 return DroneMapper.toDomain.apply(saved);
@@ -49,11 +61,9 @@ public class DronePersistenceAdapter implements DroneRepository {
     @Override
     @Async
     @Transactional(readOnly = true)
-    @Cacheable(value = "drones", key = "#id", unless = "#result == null || #result.isEmpty()")
     public CompletableFuture<Optional<Drone>> findById(String id) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                log.debug("Querying drone by id: {} [cache miss]", id);
                 return repository.findById(UUID.fromString(id))
                         .map(DroneMapper.toDomain);
             } catch (Exception e) {
@@ -63,14 +73,21 @@ public class DronePersistenceAdapter implements DroneRepository {
         });
     }
 
+    /**
+     * Busca un dron por vehicleId con cache
+     * Este es el método MÁS USADO en el flujo de telemetría
+     *
+     * @Cacheable evita consultas repetidas a BD para el mismo vehicleId
+     * El cache se actualiza automáticamente cuando se guarda un dron
+     */
     @Override
     @Async
     @Transactional(readOnly = true)
-    @Cacheable(value = "dronesByVehicleId", key = "#vehicleId", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(value = "droneCache", key = "#vehicleId", unless = "#result == null")
     public CompletableFuture<Optional<Drone>> findByVehicleId(String vehicleId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                log.debug("Querying drone by vehicleId: {} [cache miss]", vehicleId);
+                log.debug("🔍 Searching drone by vehicleId in DB: {}", vehicleId);
                 return repository.findByVehicleId(vehicleId)
                         .map(DroneMapper.toDomain);
             } catch (Exception e) {
@@ -83,11 +100,9 @@ public class DronePersistenceAdapter implements DroneRepository {
     @Override
     @Async
     @Transactional(readOnly = true)
-    @Cacheable(value = "droneExists", key = "#vehicleId")
     public CompletableFuture<Boolean> existsByVehicleId(String vehicleId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                log.debug("Checking if drone exists by vehicleId: {} [cache miss]", vehicleId);
                 return repository.existsByVehicleId(vehicleId);
             } catch (Exception e) {
                 log.error("❌ Error checking if drone exists by vehicleId: {}", vehicleId, e);

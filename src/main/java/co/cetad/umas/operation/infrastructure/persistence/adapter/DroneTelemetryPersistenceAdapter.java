@@ -19,6 +19,10 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Adaptador de persistencia para telemetría usando JPA
  * Mantiene la interfaz asíncrona con CompletableFuture
+ *
+ * IMPORTANTE: NO hay cache para telemetría
+ * - Toda telemetría entrante DEBE almacenarse en BD
+ * - Cache solo se usa para tabla de drones
  */
 @Slf4j
 @Component
@@ -27,6 +31,10 @@ public class DroneTelemetryPersistenceAdapter implements DroneTelemetryRepositor
 
     private final R2dbcDroneTelemetryRepository repository;
 
+    /**
+     * Guarda telemetría en BD - SIN CACHE
+     * Toda telemetría debe persistirse siempre
+     */
     @Override
     @Async
     @Transactional
