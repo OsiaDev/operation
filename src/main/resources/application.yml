@@ -19,6 +19,30 @@ spring:
       idle-timeout: 600000
       max-lifetime: 1800000
 
+  # ===== REDIS CONFIGURATION =====
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+          max-wait: 2000ms
+        shutdown-timeout: 200ms
+
+  # ===== CACHE CONFIGURATION =====
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000  # 1 hora en milisegundos
+      cache-null-values: false
+      use-key-prefix: true
+      key-prefix: "umas:cache:"
+
   kafka:
     consumer:
       bootstrap-servers: ${KAFKA_BROKERS:localhost:29092}
@@ -37,3 +61,19 @@ spring:
       retries: 3
       properties:
         enable.idempotence: true
+
+# ===== MANAGEMENT / ACTUATOR =====
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,caches,redis
+  endpoint:
+    health:
+      show-details: always
+  health:
+    redis:
+      enabled: true
+  metrics:
+    enable:
+      cache: true
