@@ -17,11 +17,11 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Servicio que procesa telemetría de drones y auto-registra drones desconocidos
  *
- * Responsabilidades:
- * 1. Verificar si el dron existe en la base de datos
- * 2. Si no existe, crear automáticamente con valores predeterminados
- * 3. Transformar evento a modelo de dominio
- * 4. Persistir telemetría en base de datos
+ * FLUJO OPTIMIZADO:
+ * 1. Guarda telemetría INMEDIATAMENTE (sin esperar verificación del dron)
+ * 2. Paralelamente, verifica/crea el dron de forma asíncrona
+ *
+ * La telemetría NUNCA se bloquea esperando que exista el dron
  */
 @Slf4j
 @Service
@@ -33,25 +33,48 @@ public class DroneTelemetryService implements EventProcessor<DroneTelemetry, Tel
 
     /**
      * Procesa y almacena un evento de telemetría
-     * Si el dron no existe, lo crea automáticamente antes de guardar la telemetría
+     *
+     * FLUJO OPTIMIZADO:
+     * 1. Guarda telemetría INMEDIATAMENTE (no espera verificación del dron)
+     * 2. Paralelamente, verifica/crea el dron de forma asíncrona
+     *
+     * La telemetría NUNCA debe bloquearse esperando que exista el dron
      */
     @Override
     public CompletableFuture<DroneTelemetry> process(TelemetryEvent event) {
         log.debug("Processing telemetry for vehicle: {}", event.vehicleId());
 
-        return ensureDroneExists(event.vehicleId())
-                .thenCompose(drone -> {
-                    log.debug("Drone verified/created: {} for vehicleId: {}",
-                            drone.id(), drone.vehicleId());
-                    return saveTelemetry(event);
-                })
+        // Guardar telemetría INMEDIATAMENTE sin esperar nada
+        CompletableFuture<DroneTelemetry> telemetrySaved = saveTelemetry(event)
                 .exceptionally(throwable -> {
-                    log.error("Failed to process telemetry for vehicle: {}",
+                    log.error("❌ Failed to save telemetry for vehicle: {}",
                             event.vehicleId(), throwable);
-                    throw new RuntimeException(
-                            "Telemetry processing failed for vehicle: " + event.vehicleId(),
+                    throw new TelemetrySaveException(
+                            "Failed to save telemetry for vehicle: " + event.vehicleId(),
                             throwable
                     );
+                });
+
+        // Paralelamente, verificar/crear dron (no bloquea la telemetría)
+        ensureDroneExistsAsync(event.vehicleId());
+
+        return telemetrySaved;
+    }
+
+    /**
+     * Verifica/crea dron de forma completamente asíncrona
+     * Este proceso NO debe bloquear el guardado de telemetría
+     */
+    private void ensureDroneExistsAsync(String vehicleId) {
+        ensureDroneExists(vehicleId)
+                .thenAccept(drone ->
+                        log.debug("✅ Drone verified/created: {} for vehicleId: {}",
+                                drone.id(), drone.vehicleId())
+                )
+                .exceptionally(throwable -> {
+                    log.warn("⚠️ Failed to verify/create drone for vehicleId: {} " +
+                            "(telemetry was saved anyway)", vehicleId, throwable);
+                    return null;
                 });
     }
 
@@ -140,6 +163,15 @@ public class DroneTelemetryService implements EventProcessor<DroneTelemetry, Tel
                 location,
                 metrics
         );
+    }
+
+    /**
+     * Excepción personalizada para errores de guardado de telemetría
+     */
+    public static class TelemetrySaveException extends RuntimeException {
+        public TelemetrySaveException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     /**
