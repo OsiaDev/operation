@@ -43,7 +43,7 @@ public final class DroneMissionMapper {
         entity.setUpdatedAt(mission.updatedAt());
 
         // Marcar como nuevo para INSERT
-        entity.setNew(true);
+        entity.setNew(mission.isNew());
 
         return entity;
     };

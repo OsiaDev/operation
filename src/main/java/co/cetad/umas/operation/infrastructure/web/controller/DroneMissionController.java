@@ -136,7 +136,7 @@ public class DroneMissionController {
      * @return Misión en ejecución con estado EN_EJECUCION
      */
     @PostMapping(
-            value = "/{id}/execute",
+            value = "/execute/{id}",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
