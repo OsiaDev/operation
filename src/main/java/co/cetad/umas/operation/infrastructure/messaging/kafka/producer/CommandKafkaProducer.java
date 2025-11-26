@@ -1,7 +1,6 @@
 package co.cetad.umas.operation.infrastructure.messaging.kafka.producer;
 
 import co.cetad.umas.operation.domain.model.dto.ExecutionCommand;
-import co.cetad.umas.operation.domain.model.dto.MissionExecutionCommand;
 import co.cetad.umas.operation.domain.ports.out.CommandExecutionPublisher;
 import co.cetad.umas.operation.infrastructure.messaging.kafka.config.KafkaTopicsProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,7 +14,7 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Producer de Kafka para comandos de ejecución de misiones
+ * Producer de Kafka para comandos de ejecución de drones
  * Publica comandos al tópico de ejecución para que el servicio core los procese
  *
  * IMPORTANTE: Basado en el patrón del TelemetryPublisher
@@ -29,17 +28,16 @@ import java.util.concurrent.CompletableFuture;
 public class CommandKafkaProducer implements CommandExecutionPublisher {
 
     private final KafkaTopicsProperties topics;
-
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
     /**
-     * Publica un comando de ejecución de misión al tópico de Kafka
+     * Publica un comando de ejecución al tópico de Kafka
      *
      * Basado en el patrón del TelemetryPublisher pero adaptado para CompletableFuture
      * No usa .join() para evitar bloqueos
      *
-     * @param command Comando de ejecución con waypoints de la ruta
+     * @param command Comando de ejecución con código UGCS
      * @return CompletableFuture que se completa cuando el mensaje se envía exitosamente
      */
     @Override
@@ -49,11 +47,10 @@ public class CommandKafkaProducer implements CommandExecutionPublisher {
             // Serializar comando a JSON
             String messageJson = objectMapper.writeValueAsString(command);
 
-            log.info("📤 Publishing execution command for mission: {} to topic: {}",
-                    command.missionId(), topics.getExecute());
+            log.info("📤 Publishing command '{}' for mission: {} (vehicleId: {}) to topic: {}",
+                    command.commandCode(), command.missionId(), command.vehicleId(), topics.getExecute());
 
-            log.debug("Execution command details: vehicleId={}, missionId={}, commandCode={}",
-                    command.vehicleId(), command.missionId(), command.commandCode());
+            log.debug("Full command details: {}", messageJson);
 
             // Enviar mensaje a Kafka usando vehicleId como key para partitioning
             // NO usar .join() - convertir directamente a CompletableFuture
@@ -66,28 +63,31 @@ public class CommandKafkaProducer implements CommandExecutionPublisher {
             // Transformar el resultado a CompletableFuture<Void>
             return kafkaFuture
                     .thenAccept(result -> {
-                        log.info("✅ Execution command published successfully for mission: {} " +
+                        log.info("✅ Command '{}' published successfully for mission: {} " +
                                         "to partition: {} at offset: {}",
+                                command.commandCode(),
                                 command.missionId(),
                                 result.getRecordMetadata().partition(),
                                 result.getRecordMetadata().offset());
                     })
                     .exceptionally(e -> {
-                        log.error("❌ Failed to publish execution command for mission: {}",
-                                command.missionId(), e);
+                        log.error("❌ Failed to publish command '{}' for mission: {}",
+                                command.commandCode(), command.missionId(), e);
                         throw new MessagePublishException(
-                                "Failed to publish execution command for mission: " + command.missionId(),
+                                String.format("Failed to publish command '%s' for mission: %s",
+                                        command.commandCode(), command.missionId()),
                                 e
                         );
                     });
 
         } catch (Exception e) {
             // Error en serialización u otros problemas sincrónicos
-            log.error("❌ Failed to serialize execution command for mission: {}",
-                    command.missionId(), e);
+            log.error("❌ Failed to serialize command '{}' for mission: {}",
+                    command.commandCode(), command.missionId(), e);
             return CompletableFuture.failedFuture(
                     new MessagePublishException(
-                            "Failed to serialize execution command for mission: " + command.missionId(),
+                            String.format("Failed to serialize command '%s' for mission: %s",
+                                    command.commandCode(), command.missionId()),
                             e
                     )
             );
