@@ -6,8 +6,8 @@ import co.cetad.umas.operation.infrastructure.persistence.mapper.DroneMapper;
 import co.cetad.umas.operation.infrastructure.persistence.postgresql.repository.R2dbcDroneRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CachePut;
-import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,9 +20,12 @@ import java.util.concurrent.CompletableFuture;
  * Adaptador de persistencia para drones usando JPA
  * Mantiene la interfaz asíncrona con CompletableFuture
  *
+ * REFACTORIZADO: Uso directo de CacheManager en lugar de anotaciones
+ * para evitar problemas de race conditions y serialización
+ *
  * Cache configurado SOLO para drones:
- * - findByVehicleId: Cacheable (evita consultas repetidas)
- * - save: CachePut (actualiza cache después de guardar)
+ * - findByVehicleId: Consulta cache manualmente antes de buscar en BD
+ * - save: Actualiza cache manualmente después de guardar
  *
  * IMPORTANTE: El cache almacena Drone directamente (no Optional<Drone>)
  * para evitar problemas de serialización con Redis
@@ -33,28 +36,42 @@ import java.util.concurrent.CompletableFuture;
 public class DronePersistenceAdapter implements DroneRepository {
 
     private final R2dbcDroneRepository repository;
+    private final CacheManager cacheManager;
+
+    private static final String CACHE_NAME = "droneCache";
 
     /**
-     * Guarda un dron y actualiza el cache
-     * @CachePut asegura que el cache se actualice con el nuevo valor
-     *
-     * Cache almacena Drone directamente (no Optional)
+     * Guarda un dron y actualiza el cache manualmente
+     * Usa CacheManager directamente en lugar de @CachePut para mejor control
      */
     @Override
     @Async
-    @Transactional
-    @CachePut(value = "droneCache", key = "#drone.vehicleId",
-            unless = "#drone == null")
     public CompletableFuture<Drone> save(Drone drone) {
         return CompletableFuture.supplyAsync(() -> {
             try {
+                // Guardar en BD primero (sin transacción para evitar problemas con CompletableFuture)
                 var entity = DroneMapper.toEntity.apply(drone);
                 var saved = repository.save(entity);
+                var savedDrone = DroneMapper.toDomain.apply(saved);
 
-                log.info("✅ Saved drone: {} with vehicleId: {} (cache updated)",
+                log.info("✅ Saved drone: {} with vehicleId: {}",
                         saved.getId(), saved.getVehicleId());
 
-                return DroneMapper.toDomain.apply(saved);
+                // Actualizar cache DESPUÉS de guardar exitosamente
+                // Con try-catch para que errores de cache no afecten la persistencia
+                try {
+                    Cache cache = cacheManager.getCache(CACHE_NAME);
+                    if (cache != null) {
+                        cache.put(savedDrone.vehicleId(), savedDrone);
+                        log.debug("💾 Cache updated for vehicleId: {}", savedDrone.vehicleId());
+                    }
+                } catch (Exception cacheError) {
+                    // NO fallar si el cache falla - el dato ya está en BD
+                    log.warn("⚠️ Failed to update cache for vehicleId: {} (drone saved successfully)",
+                            savedDrone.vehicleId(), cacheError);
+                }
+
+                return savedDrone;
             } catch (Exception e) {
                 log.error("❌ Error saving drone with vehicleId: {}",
                         drone.vehicleId(), e);
@@ -80,16 +97,14 @@ public class DronePersistenceAdapter implements DroneRepository {
     }
 
     /**
-     * Busca un dron por vehicleId con cache
+     * Busca un dron por vehicleId con cache manual
      * Este es el método MÁS USADO en el flujo de telemetría
      *
-     * SOLUCIÓN AL PROBLEMA DE SERIALIZACIÓN:
-     * - El cache almacena Drone directamente (no Optional<Drone>)
-     * - El método devuelve Optional<Drone> para mantener la interfaz
-     * - Si encuentra en cache, lo envuelve en Optional
-     * - Si no encuentra en cache, busca en BD y cachea el resultado
-     *
-     * @Cacheable evita consultas repetidas a BD para el mismo vehicleId
+     * REFACTORIZADO para usar CacheManager directamente:
+     * - Consulta cache manualmente antes de ir a BD
+     * - Maneja errores de cache sin afectar la funcionalidad
+     * - Actualiza cache solo si encuentra el dato en BD
+     * - Cache almacena Drone directamente (no Optional<Drone>)
      */
     @Override
     @Async
@@ -97,21 +112,39 @@ public class DronePersistenceAdapter implements DroneRepository {
     public CompletableFuture<Optional<Drone>> findByVehicleId(String vehicleId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // Buscar en cache primero (usa método auxiliar)
-                Drone cachedDrone = findByVehicleIdFromCache(vehicleId);
-
-                if (cachedDrone != null) {
-                    log.debug("🎯 Cache HIT for vehicleId: {}", vehicleId);
-                    return Optional.of(cachedDrone);
+                // Intentar obtener del cache primero
+                Cache cache = cacheManager.getCache(CACHE_NAME);
+                if (cache != null) {
+                    try {
+                        Cache.ValueWrapper wrapper = cache.get(vehicleId);
+                        if (wrapper != null && wrapper.get() != null) {
+                            Drone cachedDrone = (Drone) wrapper.get();
+                            log.debug("🎯 Cache HIT for vehicleId: {}", vehicleId);
+                            return Optional.of(cachedDrone);
+                        }
+                    } catch (Exception cacheError) {
+                        // Si el cache falla, continuar con búsqueda en BD
+                        log.warn("⚠️ Cache read failed for vehicleId: {}, falling back to DB",
+                                vehicleId, cacheError);
+                    }
                 }
 
-                // Cache MISS - buscar en BD
+                // Cache MISS o error - buscar en BD
                 log.debug("🔍 Cache MISS for vehicleId: {}. Searching in DB...", vehicleId);
                 Optional<Drone> droneOpt = repository.findByVehicleId(vehicleId)
                         .map(DroneMapper.toDomain);
 
-                // Si encontró en BD, cachear el resultado
-                droneOpt.ifPresent(drone -> cacheVehicleId(vehicleId, drone));
+                // Si encontró en BD, intentar cachear (con try-catch para no fallar si cache falla)
+                if (droneOpt.isPresent() && cache != null) {
+                    try {
+                        cache.put(vehicleId, droneOpt.get());
+                        log.debug("💾 Cached drone for vehicleId: {}", vehicleId);
+                    } catch (Exception cacheError) {
+                        // NO fallar si el cache falla - el dato está disponible
+                        log.warn("⚠️ Failed to cache drone for vehicleId: {} (data available from DB)",
+                                vehicleId, cacheError);
+                    }
+                }
 
                 return droneOpt;
             } catch (Exception e) {
@@ -121,35 +154,27 @@ public class DronePersistenceAdapter implements DroneRepository {
         });
     }
 
-    /**
-     * Método auxiliar que busca en cache y retorna Drone directamente
-     * (no Optional) para evitar problemas de serialización
-     *
-     * @Cacheable almacena Drone directamente, no Optional<Drone>
-     */
-    @Cacheable(value = "droneCache", key = "#vehicleId", unless = "#result == null")
-    public Drone findByVehicleIdFromCache(String vehicleId) {
-        // Este método nunca se ejecuta si hay cache
-        // Solo se usa para que @Cacheable funcione correctamente
-        return null;
-    }
-
-    /**
-     * Método auxiliar para cachear un dron por vehicleId
-     * @CachePut almacena Drone directamente en cache
-     */
-    @CachePut(value = "droneCache", key = "#vehicleId", unless = "#drone == null")
-    public Drone cacheVehicleId(String vehicleId, Drone drone) {
-        log.debug("💾 Caching drone for vehicleId: {}", vehicleId);
-        return drone;
-    }
-
     @Override
     @Async
     @Transactional(readOnly = true)
     public CompletableFuture<Boolean> existsByVehicleId(String vehicleId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
+                // Primero verificar en cache
+                Cache cache = cacheManager.getCache(CACHE_NAME);
+                if (cache != null) {
+                    try {
+                        Cache.ValueWrapper wrapper = cache.get(vehicleId);
+                        if (wrapper != null && wrapper.get() != null) {
+                            log.debug("🎯 Cache HIT for exists check, vehicleId: {}", vehicleId);
+                            return true;
+                        }
+                    } catch (Exception cacheError) {
+                        log.debug("⚠️ Cache read failed for exists check, falling back to DB");
+                    }
+                }
+
+                // Cache MISS - verificar en BD
                 return repository.existsByVehicleId(vehicleId);
             } catch (Exception e) {
                 log.error("❌ Error checking if drone exists by vehicleId: {}", vehicleId, e);
