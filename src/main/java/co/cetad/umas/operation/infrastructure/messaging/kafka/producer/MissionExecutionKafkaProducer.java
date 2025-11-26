@@ -50,7 +50,7 @@ public class MissionExecutionKafkaProducer implements MissionExecutionPublisher 
             String messageJson = objectMapper.writeValueAsString(command);
 
             log.info("📤 Publishing execution command for mission: {} to topic: {}",
-                    command.missionId(), topics.getExecute());
+                    command.missionId(), topics.getMission());
 
             log.debug("Execution command details: vehicleId={}, missionId={}, waypoints={}",
                     command.vehicleId(), command.missionId(), command.waypoints().size());
@@ -58,7 +58,7 @@ public class MissionExecutionKafkaProducer implements MissionExecutionPublisher 
             // Enviar mensaje a Kafka usando vehicleId como key para partitioning
             // NO usar .join() - convertir directamente a CompletableFuture
             CompletableFuture<SendResult<String, String>> kafkaFuture = kafkaTemplate.send(
-                    topics.getExecute(),
+                    topics.getMission(),
                     command.vehicleId(),  // Key: vehicleId para partitioning
                     messageJson
             ).toCompletableFuture();

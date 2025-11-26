@@ -67,6 +67,7 @@ kafka:
   topics:
     telemetry: umas.drone.telemetry
     execute: umas.drone.execute
+    mission: umas.drone.mission
 
 # ===== MANAGEMENT / ACTUATOR =====
 management:

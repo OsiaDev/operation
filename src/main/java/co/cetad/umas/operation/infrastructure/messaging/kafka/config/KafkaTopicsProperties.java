@@ -11,4 +11,6 @@ public class KafkaTopicsProperties {
 
     private String execute = "umas.drone.execute";
 
+    private String mission = "umas.drone.mission";
+
 }
