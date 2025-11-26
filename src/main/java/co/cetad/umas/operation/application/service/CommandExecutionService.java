@@ -63,10 +63,9 @@ public class CommandExecutionService implements ExecuteCommandUseCase {
                                 );
                             });
                 })
-                .thenApply(result -> {
+                .thenRun(() -> {
                     log.info("✅ Command {} executed successfully for mission: {}",
                             commandCode, missionId);
-                    return null;
                 })
                 .exceptionally(throwable -> {
                     log.error("❌ Failed to execute command {} for mission: {}",
@@ -107,10 +106,9 @@ public class CommandExecutionService implements ExecuteCommandUseCase {
         var command = ExecutionCommand.create(vehicleId, missionId, commandCode);
 
         return commandPublisher.publishExecutionCommand(command)
-                .thenApply(result -> {
+                .thenAccept(result -> {
                     log.info("✅ Command published for vehicleId: {}, missionId: {}, commandCode: {}",
                             vehicleId, missionId, commandCode);
-                    return null;
                 })
                 .exceptionally(throwable -> {
                     log.error("❌ Failed to publish command for mission: {}",
