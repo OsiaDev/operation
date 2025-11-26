@@ -1,7 +1,8 @@
 package co.cetad.umas.operation.infrastructure.messaging.kafka.producer;
 
+import co.cetad.umas.operation.domain.model.dto.ExecutionCommand;
 import co.cetad.umas.operation.domain.model.dto.MissionExecutionCommand;
-import co.cetad.umas.operation.domain.ports.out.MissionExecutionPublisher;
+import co.cetad.umas.operation.domain.ports.out.CommandExecutionPublisher;
 import co.cetad.umas.operation.infrastructure.messaging.kafka.config.KafkaTopicsProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +26,7 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class CommandKafkaProducer implements MissionExecutionPublisher {
+public class CommandKafkaProducer implements CommandExecutionPublisher {
 
     private final KafkaTopicsProperties topics;
 
@@ -43,7 +44,7 @@ public class CommandKafkaProducer implements MissionExecutionPublisher {
      */
     @Override
     @Async
-    public CompletableFuture<Void> publishExecutionCommand(MissionExecutionCommand command) {
+    public CompletableFuture<Void> publishExecutionCommand(ExecutionCommand command) {
         try {
             // Serializar comando a JSON
             String messageJson = objectMapper.writeValueAsString(command);
@@ -51,8 +52,8 @@ public class CommandKafkaProducer implements MissionExecutionPublisher {
             log.info("📤 Publishing execution command for mission: {} to topic: {}",
                     command.missionId(), topics.getExecute());
 
-            log.debug("Execution command details: vehicleId={}, missionId={}, waypoints={}",
-                    command.vehicleId(), command.missionId(), command.waypoints().size());
+            log.debug("Execution command details: vehicleId={}, missionId={}, commandCode={}",
+                    command.vehicleId(), command.missionId(), command.commandCode());
 
             // Enviar mensaje a Kafka usando vehicleId como key para partitioning
             // NO usar .join() - convertir directamente a CompletableFuture
