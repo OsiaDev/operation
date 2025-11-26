@@ -13,7 +13,6 @@ import java.util.Objects;
 public record MissionExecutionCommand(
         @JsonProperty("vehicleId") String vehicleId,
         @JsonProperty("missionId") String missionId,
-        @JsonProperty("commandCode") String commandCode,
         @JsonProperty("waypoints") List<Waypoint> waypoints,
         @JsonProperty("priority") Integer priority
 ) {
@@ -21,7 +20,6 @@ public record MissionExecutionCommand(
     public MissionExecutionCommand {
         Objects.requireNonNull(vehicleId, "Vehicle ID cannot be null");
         Objects.requireNonNull(missionId, "Mission ID cannot be null");
-        Objects.requireNonNull(commandCode, "Command code cannot be null");
         Objects.requireNonNull(waypoints, "Waypoints cannot be null");
 
         if (vehicleId.isBlank()) {
@@ -29,9 +27,6 @@ public record MissionExecutionCommand(
         }
         if (missionId.isBlank()) {
             throw new IllegalArgumentException("Mission ID cannot be empty");
-        }
-        if (commandCode.isBlank()) {
-            throw new IllegalArgumentException("Command code cannot be empty");
         }
         if (waypoints.isEmpty()) {
             throw new IllegalArgumentException("Waypoints list cannot be empty");
@@ -57,7 +52,6 @@ public record MissionExecutionCommand(
         return new MissionExecutionCommand(
                 vehicleId,
                 missionId,
-                "EXECUTE_ROUTE",  // Código de comando para ejecutar ruta
                 waypoints,
                 1  // Prioridad normal
         );
