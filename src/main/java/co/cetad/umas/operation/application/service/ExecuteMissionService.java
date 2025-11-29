@@ -19,8 +19,10 @@ import java.util.concurrent.CompletableFuture;
  * REFACTORIZACIÓN: Ahora coordina:
  * 1. Validación de la misión
  * 2. Búsqueda de TODOS los drones asignados a la misión
- * 3. Para cada dron: buscar ruta, extraer waypoints, publicar comando
- * 4. Actualización del estado de la misión a EN_EJECUCION
+ * 3. Para cada dron: buscar ruta, extraer waypoints
+ * 4. Construir lista de DroneExecution (vehicleId + waypoints)
+ * 5. Publicar UN SOLO mensaje con todos los drones
+ * 6. Actualización del estado de la misión a EN_EJECUCION
  */
 @Slf4j
 @Service
@@ -114,8 +116,12 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
     /**
      * Flujo de ejecución completo:
      * 1. Buscar TODOS los drones asignados a la misión
-     * 2. Para cada dron: obtener vehicleId, buscar ruta, extraer waypoints, publicar
-     * 3. Actualizar estado de la misión a EN_EJECUCION con start_date
+     * 2. Para cada dron: obtener vehicleId, buscar ruta, extraer waypoints
+     * 3. Construir lista de DroneExecution
+     * 4. Publicar UN SOLO comando con todos los drones
+     * 5. Actualizar estado de la misión a EN_EJECUCION con start_date
+     *
+     * REFACTORIZACIÓN: Ahora envía un solo mensaje con todos los drones
      */
     private CompletableFuture<Mission> executeMissionFlow(Mission mission) {
         log.info("🚀 Starting execution flow for mission: {}", mission.id());
@@ -132,11 +138,15 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
                     log.info("Found {} drone(s) assigned to mission: {}",
                             assignments.size(), mission.id());
 
-                    // Paso 2: Procesar cada asignación de dron
-                    return processDroneAssignments(mission, assignments);
+                    // Paso 2: Procesar TODOS los drones y construir lista de DroneExecution
+                    return buildDroneExecutionList(mission, assignments);
+                })
+                .thenCompose(droneExecutions -> {
+                    // Paso 3: Publicar UN SOLO comando con todos los drones
+                    return publishMissionExecutionCommand(mission, droneExecutions);
                 })
                 .thenCompose(processedMission -> {
-                    // Paso 3: Actualizar estado de la misión a EN_EJECUCION
+                    // Paso 4: Actualizar estado de la misión a EN_EJECUCION
                     return updateMissionToInProgress(processedMission);
                 })
                 .exceptionally(throwable -> {
@@ -150,52 +160,66 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
     }
 
     /**
-     * Procesa todas las asignaciones de drones en paralelo
-     * Para cada dron: busca su vehicleId, ruta, waypoints y publica comando
+     * Construye la lista de DroneExecution procesando todas las asignaciones en paralelo
+     * Cada DroneExecution contiene el vehicleId del dron y sus waypoints
+     *
+     * OPTIMIZACIÓN: Procesa todos los drones en paralelo
+     *
+     * @param mission Misión a ejecutar
+     * @param assignments Lista de asignaciones de drones
+     * @return CompletableFuture con lista de DroneExecution
      */
-    private CompletableFuture<Mission> processDroneAssignments(
+    private CompletableFuture<List<MissionExecutionCommand.DroneExecution>> buildDroneExecutionList(
             Mission mission,
             List<DroneMissionAssignment> assignments
     ) {
-        log.info("Processing {} drone assignment(s) for mission: {}",
+        log.info("Building DroneExecution list for {} drone(s) in mission: {}",
                 assignments.size(), mission.id());
 
-        // Crear futures para procesar cada asignación
-        List<CompletableFuture<Void>> assignmentFutures = assignments.stream()
-                .map(assignment -> processSingleDroneAssignment(mission, assignment))
-                .toList();
+        // Crear futures para procesar cada asignación en paralelo
+        List<CompletableFuture<MissionExecutionCommand.DroneExecution>> executionFutures =
+                assignments.stream()
+                        .map(this::buildSingleDroneExecution)
+                        .toList();
 
-        // Esperar a que todas las asignaciones se procesen
+        // Esperar a que todas las ejecuciones se construyan
         return CompletableFuture.allOf(
-                        assignmentFutures.toArray(new CompletableFuture[0])
+                        executionFutures.toArray(new CompletableFuture[0])
                 )
                 .thenApply(v -> {
-                    log.info("✅ All {} drone(s) processed successfully for mission: {}",
-                            assignments.size(), mission.id());
-                    return mission;
+                    List<MissionExecutionCommand.DroneExecution> droneExecutions =
+                            executionFutures.stream()
+                                    .map(CompletableFuture::join)
+                                    .toList();
+
+                    log.info("✅ Built {} DroneExecution(s) for mission: {}",
+                            droneExecutions.size(), mission.id());
+
+                    return droneExecutions;
                 })
                 .exceptionally(throwable -> {
-                    log.error("❌ Failed to process drone assignments for mission: {}",
+                    log.error("❌ Failed to build DroneExecution list for mission: {}",
                             mission.id(), throwable);
-                    throw new DroneAssignmentProcessingException(
-                            "Failed to process drone assignments for mission: " + mission.id(),
+                    throw new DroneExecutionBuildException(
+                            "Failed to build DroneExecution list for mission: " + mission.id(),
                             throwable
                     );
                 });
     }
 
     /**
-     * Procesa una sola asignación de dron:
+     * Construye un DroneExecution para una asignación específica:
      * 1. Buscar dron para obtener vehicleId
      * 2. Si tiene ruta: buscar ruta, extraer waypoints
-     * 3. Publicar comando de ejecución
+     * 3. Crear DroneExecution con vehicleId y waypoints
+     *
+     * @param assignment Asignación de dron a procesar
+     * @return CompletableFuture con DroneExecution
      */
-    private CompletableFuture<Void> processSingleDroneAssignment(
-            Mission mission,
+    private CompletableFuture<MissionExecutionCommand.DroneExecution> buildSingleDroneExecution(
             DroneMissionAssignment assignment
     ) {
-        log.debug("Processing assignment for drone: {} in mission: {}",
-                assignment.droneId(), mission.id());
+        log.debug("Building DroneExecution for assignment: {}", assignment.id());
 
         // Paso 1: Buscar el dron para obtener vehicleId
         return droneRepository.findById(assignment.droneId())
@@ -209,27 +233,34 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
                     Drone drone = droneOpt.get();
                     log.debug("Found drone vehicleId: {} for assignment", drone.vehicleId());
 
-                    // Paso 2: Si tiene ruta, procesarla; si no, enviar comando sin waypoints
+                    // Paso 2: Si tiene ruta, procesarla; si no, retornar sin waypoints
                     if (assignment.hasRoute()) {
-                        return processRouteAndPublish(mission, drone, assignment.routeId());
+                        return loadWaypointsForDrone(drone, assignment.routeId());
                     } else {
-                        log.warn("⚠️ Drone {} has no route assigned. Sending basic execution command.",
+                        log.warn("⚠️ Drone {} has no route assigned. Creating DroneExecution without waypoints.",
                                 drone.vehicleId());
-                        return publishBasicExecutionCommand(mission, drone);
+                        return CompletableFuture.completedFuture(
+                                MissionExecutionCommand.DroneExecution.createWithoutRoute(
+                                        drone.vehicleId()
+                                )
+                        );
                     }
                 });
     }
 
     /**
-     * Procesa la ruta: busca, extrae waypoints, publica comando
+     * Carga los waypoints de la ruta asignada a un dron
+     *
+     * @param drone Dron al que se le asignará la ruta
+     * @param routeId ID de la ruta a cargar
+     * @return CompletableFuture con DroneExecution que incluye waypoints
      */
-    private CompletableFuture<Void> processRouteAndPublish(
-            Mission mission,
+    private CompletableFuture<MissionExecutionCommand.DroneExecution> loadWaypointsForDrone(
             Drone drone,
             String routeId
     ) {
         return routeRepository.findById(routeId)
-                .thenCompose(routeOpt -> {
+                .thenApply(routeOpt -> {
                     if (routeOpt.isEmpty()) {
                         log.error("❌ Route not found: {}", routeId);
                         throw new RouteNotFoundException(
@@ -256,66 +287,44 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
                                 "Failed to parse GeoJSON for route: " + route.id(), e);
                     }
 
-                    // Publicar comando con waypoints
-                    return publishExecutionCommand(mission, drone, waypoints);
-                });
-    }
-
-    /**
-     * Publica comando de ejecución con waypoints
-     */
-    private CompletableFuture<Void> publishExecutionCommand(
-            Mission mission,
-            Drone drone,
-            List<Waypoint> waypoints
-    ) {
-        MissionExecutionCommand command = MissionExecutionCommand.create(
-                drone.vehicleId(),
-                mission.id(),
-                waypoints
-        );
-
-        return executionPublisher.publishExecutionCommand(command)
-                .thenAccept(result -> {
-                    log.info("✅ Execution command published for drone: {} in mission: {}",
-                            drone.vehicleId(), mission.id());
-                })
-                .exceptionally(throwable -> {
-                    log.error("❌ Failed to publish execution command for drone: {} in mission: {}",
-                            drone.vehicleId(), mission.id(), throwable);
-                    throw new CommandPublishException(
-                            String.format("Failed to publish execution command for drone: %s in mission: %s",
-                                    drone.vehicleId(), mission.id()),
-                            throwable
+                    // Crear DroneExecution con waypoints
+                    return MissionExecutionCommand.DroneExecution.create(
+                            drone.vehicleId(),
+                            waypoints
                     );
                 });
     }
 
     /**
-     * Publica comando básico sin waypoints (cuando no hay ruta asignada)
+     * Publica UN SOLO comando de ejecución con TODOS los drones
+     *
+     * REFACTORIZACIÓN: Ahora envía un solo mensaje en lugar de uno por dron
+     *
+     * @param mission Misión a ejecutar
+     * @param droneExecutions Lista de DroneExecution con vehicleId y waypoints
+     * @return CompletableFuture con la misión
      */
-    private CompletableFuture<Void> publishBasicExecutionCommand(
+    private CompletableFuture<Mission> publishMissionExecutionCommand(
             Mission mission,
-            Drone drone
+            List<MissionExecutionCommand.DroneExecution> droneExecutions
     ) {
-        // Comando básico sin waypoints (lista vacía o waypoint dummy)
         MissionExecutionCommand command = MissionExecutionCommand.create(
-                drone.vehicleId(),
                 mission.id(),
-                List.of() // Sin waypoints - el sistema de control decidirá qué hacer
+                droneExecutions
         );
 
         return executionPublisher.publishExecutionCommand(command)
-                .thenAccept(result -> {
-                    log.info("✅ Basic execution command published for drone: {} in mission: {}",
-                            drone.vehicleId(), mission.id());
+                .thenApply(result -> {
+                    log.info("✅ Execution command published for mission: {} with {} drone(s)",
+                            mission.id(), droneExecutions.size());
+                    return mission;
                 })
                 .exceptionally(throwable -> {
-                    log.error("❌ Failed to publish basic command for drone: {} in mission: {}",
-                            drone.vehicleId(), mission.id(), throwable);
+                    log.error("❌ Failed to publish execution command for mission: {}",
+                            mission.id(), throwable);
                     throw new CommandPublishException(
-                            String.format("Failed to publish basic command for drone: %s in mission: %s",
-                                    drone.vehicleId(), mission.id()),
+                            String.format("Failed to publish execution command for mission: %s",
+                                    mission.id()),
                             throwable
                     );
                 });
@@ -411,8 +420,8 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
         }
     }
 
-    public static class DroneAssignmentProcessingException extends RuntimeException {
-        public DroneAssignmentProcessingException(String message, Throwable cause) {
+    public static class DroneExecutionBuildException extends RuntimeException {
+        public DroneExecutionBuildException(String message, Throwable cause) {
             super(message, cause);
         }
     }

@@ -8,28 +8,26 @@ import java.util.Objects;
 
 /**
  * DTO para enviar comando de ejecución de misión a través de Kafka
- * Contiene la información necesaria para que el dron ejecute la ruta
+ * Contiene la información de TODOS los drones asignados a la misión con sus rutas
+ *
+ * REFACTORIZACIÓN: Ahora envía lista de drones con sus respectivos waypoints
+ * en lugar de un comando por dron
  */
 public record MissionExecutionCommand(
-        @JsonProperty("vehicleId") String vehicleId,
         @JsonProperty("missionId") String missionId,
-        @JsonProperty("waypoints") List<Waypoint> waypoints,
+        @JsonProperty("drones") List<DroneExecution> drones,
         @JsonProperty("priority") Integer priority
 ) {
 
     public MissionExecutionCommand {
-        Objects.requireNonNull(vehicleId, "Vehicle ID cannot be null");
         Objects.requireNonNull(missionId, "Mission ID cannot be null");
-        Objects.requireNonNull(waypoints, "Waypoints cannot be null");
+        Objects.requireNonNull(drones, "Drones cannot be null");
 
-        if (vehicleId.isBlank()) {
-            throw new IllegalArgumentException("Vehicle ID cannot be empty");
-        }
         if (missionId.isBlank()) {
             throw new IllegalArgumentException("Mission ID cannot be empty");
         }
-        if (waypoints.isEmpty()) {
-            throw new IllegalArgumentException("Waypoints list cannot be empty");
+        if (drones.isEmpty()) {
+            throw new IllegalArgumentException("Drones list cannot be empty");
         }
         if (priority == null || priority < 0) {
             priority = 0;
@@ -39,22 +37,58 @@ public record MissionExecutionCommand(
     /**
      * Factory method para crear comando de ejecución de misión
      *
-     * @param vehicleId ID del vehículo/dron
      * @param missionId ID de la misión
-     * @param waypoints Lista de waypoints de la ruta
+     * @param drones Lista de drones con sus waypoints
      * @return Comando de ejecución configurado
      */
     public static MissionExecutionCommand create(
-            String vehicleId,
             String missionId,
-            List<Waypoint> waypoints
+            List<DroneExecution> drones
     ) {
         return new MissionExecutionCommand(
-                vehicleId,
                 missionId,
-                waypoints,
+                drones,
                 1  // Prioridad normal
         );
+    }
+
+    /**
+     * DTO que representa la ejecución de un dron específico con su ruta
+     */
+    public record DroneExecution(
+            @JsonProperty("vehicleId") String vehicleId,
+            @JsonProperty("waypoints") List<Waypoint> waypoints
+    ) {
+        public DroneExecution {
+            Objects.requireNonNull(vehicleId, "Vehicle ID cannot be null");
+            Objects.requireNonNull(waypoints, "Waypoints cannot be null");
+
+            if (vehicleId.isBlank()) {
+                throw new IllegalArgumentException("Vehicle ID cannot be empty");
+            }
+            // Permitir lista vacía de waypoints (drones sin ruta asignada)
+        }
+
+        /**
+         * Factory method para crear ejecución de dron con waypoints
+         */
+        public static DroneExecution create(String vehicleId, List<Waypoint> waypoints) {
+            return new DroneExecution(vehicleId, waypoints);
+        }
+
+        /**
+         * Factory method para crear ejecución de dron sin waypoints
+         */
+        public static DroneExecution createWithoutRoute(String vehicleId) {
+            return new DroneExecution(vehicleId, List.of());
+        }
+
+        /**
+         * Verifica si el dron tiene waypoints asignados
+         */
+        public boolean hasWaypoints() {
+            return !waypoints.isEmpty();
+        }
     }
 
 }
