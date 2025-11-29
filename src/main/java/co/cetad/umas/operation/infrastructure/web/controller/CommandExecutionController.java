@@ -17,6 +17,8 @@ import reactor.core.publisher.Mono;
 /**
  * Controller REST para comandos de drones UGCS
  *
+ * REFACTORIZACIÓN: Ahora los comandos se envían a TODOS los drones asignados a la misión
+ *
  * Endpoints:
  * - POST /api/v1/commands/{missionId}/return-to-home   - Retornar a casa
  * - POST /api/v1/commands/{missionId}/takeoff          - Despegar
@@ -235,6 +237,12 @@ public class CommandExecutionController {
                 yield Mono.just(ResponseEntity
                         .status(HttpStatus.NOT_FOUND)
                         .body(new HealthResponse("ERROR", "Mission not found")));
+            }
+            case CommandExecutionService.NoDronesAssignedException e -> {
+                log.warn("⚠️ No drones assigned to mission: {}", missionId);
+                yield Mono.just(ResponseEntity
+                        .status(HttpStatus.CONFLICT)
+                        .body(new HealthResponse("ERROR", "No drones assigned to this mission")));
             }
             case CommandExecutionService.DroneNotFoundException e -> {
                 log.warn("⚠️ Drone not found for mission: {}", missionId);

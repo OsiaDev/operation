@@ -1,7 +1,9 @@
 package co.cetad.umas.operation.application.service;
 
 import co.cetad.umas.operation.domain.model.entity.MissionOrigin;
+import co.cetad.umas.operation.domain.model.vo.Mission;
 import co.cetad.umas.operation.domain.ports.in.MissionQueryUseCase;
+import co.cetad.umas.operation.domain.ports.out.MissionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -12,6 +14,8 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Servicio de consultas de misiones (CQRS - Query Side)
+ *
+ * REFACTORIZACIÓN: Ahora trabaja con Mission independiente de drones
  *
  * Responsabilidad única:
  * - Coordinar consultas de misiones
@@ -25,14 +29,14 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class MissionQueryService implements MissionQueryUseCase {
 
-    private final DroneMissionRepository missionRepository;
+    private final MissionRepository missionRepository;
 
     @Override
-    public CompletableFuture<Optional<DroneMission>> findById(String id) {
+    public CompletableFuture<Optional<Mission>> findById(String id) {
         log.debug("Querying mission by id: {}", id);
 
         return validateId(id)
-                .thenCompose(validId -> missionRepository.findById(validId))
+                .thenCompose(missionRepository::findById)
                 .exceptionally(throwable -> {
                     log.error("Error querying mission by id: {}", id, throwable);
                     return Optional.empty();
@@ -40,7 +44,7 @@ public class MissionQueryService implements MissionQueryUseCase {
     }
 
     @Override
-    public CompletableFuture<List<DroneMission>> findAll() {
+    public CompletableFuture<List<Mission>> findAll() {
         log.debug("Querying all missions");
 
         return missionRepository.findAll()
@@ -51,7 +55,7 @@ public class MissionQueryService implements MissionQueryUseCase {
     }
 
     @Override
-    public CompletableFuture<List<DroneMission>> findAuthorizedMissions() {
+    public CompletableFuture<List<Mission>> findAuthorizedMissions() {
         log.debug("Querying authorized missions (MANUAL)");
 
         return missionRepository.findByMissionType(MissionOrigin.MANUAL)
@@ -66,7 +70,7 @@ public class MissionQueryService implements MissionQueryUseCase {
     }
 
     @Override
-    public CompletableFuture<List<DroneMission>> findUnauthorizedMissions() {
+    public CompletableFuture<List<Mission>> findUnauthorizedMissions() {
         log.debug("Querying unauthorized missions (AUTOMATICA)");
 
         return missionRepository.findByMissionType(MissionOrigin.AUTOMATICA)

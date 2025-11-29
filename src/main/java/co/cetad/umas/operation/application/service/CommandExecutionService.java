@@ -1,23 +1,31 @@
 package co.cetad.umas.operation.application.service;
 
 import co.cetad.umas.operation.domain.model.dto.ExecutionCommand;
+import co.cetad.umas.operation.domain.model.vo.Drone;
+import co.cetad.umas.operation.domain.model.vo.DroneMissionAssignment;
+import co.cetad.umas.operation.domain.model.vo.Mission;
 import co.cetad.umas.operation.domain.ports.in.ExecuteCommandUseCase;
 import co.cetad.umas.operation.domain.ports.out.CommandExecutionPublisher;
+import co.cetad.umas.operation.domain.ports.out.DroneMissionAssignmentRepository;
 import co.cetad.umas.operation.domain.ports.out.DroneRepository;
 import co.cetad.umas.operation.domain.ports.out.MissionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
  * Servicio de aplicación para ejecutar comandos de drones
- * Coordina:
+ *
+ * REFACTORIZACIÓN: Ahora coordina:
  * 1. Validación del ID de misión
  * 2. Búsqueda de la misión
- * 3. Búsqueda del dron asociado
- * 4. Publicación del comando a Kafka
+ * 3. Búsqueda de TODOS los drones asignados a la misión
+ * 4. Publicación del comando a Kafka para CADA dron
+ *
+ * IMPORTANTE: Un comando se envía a TODOS los drones asignados a la misión
  */
 @Slf4j
 @Service
@@ -25,6 +33,7 @@ import java.util.concurrent.CompletableFuture;
 public class CommandExecutionService implements ExecuteCommandUseCase {
 
     private final MissionRepository missionRepository;
+    private final DroneMissionAssignmentRepository assignmentRepository;
     private final DroneRepository droneRepository;
     private final CommandExecutionPublisher commandPublisher;
 
@@ -41,26 +50,23 @@ public class CommandExecutionService implements ExecuteCommandUseCase {
                                 "Mission not found with id: " + missionId);
                     }
 
-                    var mission = missionOpt.get();
-                    log.debug("Found mission: {} for drone: {}", mission.id(), mission.droneId());
+                    Mission mission = missionOpt.get();
+                    log.debug("Found mission: {}", mission.id());
 
-                    return droneRepository.findById(mission.droneId())
-                            .thenCompose(droneOpt -> {
-                                if (droneOpt.isEmpty()) {
-                                    log.error("❌ Drone not found: {}", mission.droneId());
-                                    throw new DroneNotFoundException(
-                                            "Drone not found with id: " + mission.droneId());
+                    // Buscar TODOS los drones asignados a esta misión
+                    return assignmentRepository.findByMissionId(mission.id())
+                            .thenCompose(assignments -> {
+                                if (assignments.isEmpty()) {
+                                    log.error("❌ No drones assigned to mission: {}", mission.id());
+                                    throw new NoDronesAssignedException(
+                                            "No drones assigned to mission: " + mission.id());
                                 }
 
-                                var drone = droneOpt.get();
-                                log.debug("Found drone vehicleId: {} for mission: {}",
-                                        drone.vehicleId(), mission.id());
+                                log.info("Found {} drone(s) assigned to mission: {}",
+                                        assignments.size(), mission.id());
 
-                                return publishCommand(
-                                        drone.vehicleId(),
-                                        mission.id(),
-                                        commandCode
-                                );
+                                // Publicar comando para CADA dron asignado
+                                return publishCommandToAllDrones(mission, assignments, commandCode);
                             });
                 })
                 .thenRun(() -> {
@@ -96,25 +102,94 @@ public class CommandExecutionService implements ExecuteCommandUseCase {
     }
 
     /**
-     * Publica el comando al sistema de mensajería
+     * Publica el comando a TODOS los drones asignados a la misión en paralelo
+     */
+    private CompletableFuture<Void> publishCommandToAllDrones(
+            Mission mission,
+            List<DroneMissionAssignment> assignments,
+            String commandCode
+    ) {
+        log.info("Publishing command '{}' to {} drone(s) for mission: {}",
+                commandCode, assignments.size(), mission.id());
+
+        // Crear futures para publicar comando a cada dron
+        List<CompletableFuture<Void>> publishFutures = assignments.stream()
+                .map(assignment -> publishCommandForDrone(mission, assignment, commandCode))
+                .toList();
+
+        // Esperar a que todos los comandos se publiquen
+        return CompletableFuture.allOf(
+                        publishFutures.toArray(new CompletableFuture[0])
+                )
+                .thenRun(() -> {
+                    log.info("✅ Command '{}' published to all {} drone(s) for mission: {}",
+                            commandCode, assignments.size(), mission.id());
+                })
+                .exceptionally(throwable -> {
+                    log.error("❌ Failed to publish command to all drones for mission: {}",
+                            mission.id(), throwable);
+                    throw new CommandPublishException(
+                            "Failed to publish command to all drones for mission: " + mission.id(),
+                            throwable
+                    );
+                });
+    }
+
+    /**
+     * Publica el comando para un dron específico
+     */
+    private CompletableFuture<Void> publishCommandForDrone(
+            Mission mission,
+            DroneMissionAssignment assignment,
+            String commandCode
+    ) {
+        log.debug("Publishing command '{}' for drone: {} in mission: {}",
+                commandCode, assignment.droneId(), mission.id());
+
+        return droneRepository.findById(assignment.droneId())
+                .thenCompose(droneOpt -> {
+                    if (droneOpt.isEmpty()) {
+                        log.error("❌ Drone not found: {}", assignment.droneId());
+                        throw new DroneNotFoundException(
+                                "Drone not found with id: " + assignment.droneId());
+                    }
+
+                    Drone drone = droneOpt.get();
+                    log.debug("Found drone vehicleId: {} for assignment", drone.vehicleId());
+
+                    return publishCommand(
+                            drone.vehicleId(),
+                            mission.id(),
+                            commandCode
+                    );
+                })
+                .thenRun(() -> {
+                    log.debug("✅ Command '{}' published for drone: {}",
+                            commandCode, assignment.droneId());
+                });
+    }
+
+    /**
+     * Publica el comando al sistema de mensajería (Kafka)
      */
     private CompletableFuture<Void> publishCommand(
             String vehicleId,
             String missionId,
             String commandCode
     ) {
-        var command = ExecutionCommand.create(vehicleId, missionId, commandCode);
+        ExecutionCommand command = ExecutionCommand.create(vehicleId, missionId, commandCode);
 
         return commandPublisher.publishExecutionCommand(command)
                 .thenAccept(result -> {
-                    log.info("✅ Command published for vehicleId: {}, missionId: {}, commandCode: {}",
+                    log.debug("✅ Command published for vehicleId: {}, missionId: {}, commandCode: {}",
                             vehicleId, missionId, commandCode);
                 })
                 .exceptionally(throwable -> {
-                    log.error("❌ Failed to publish command for mission: {}",
-                            missionId, throwable);
+                    log.error("❌ Failed to publish command for vehicleId: {} in mission: {}",
+                            vehicleId, missionId, throwable);
                     throw new CommandPublishException(
-                            "Failed to publish command for mission: " + missionId,
+                            String.format("Failed to publish command for vehicleId: %s in mission: %s",
+                                    vehicleId, missionId),
                             throwable
                     );
                 });
@@ -124,6 +199,12 @@ public class CommandExecutionService implements ExecuteCommandUseCase {
 
     public static class MissionNotFoundException extends RuntimeException {
         public MissionNotFoundException(String message) {
+            super(message);
+        }
+    }
+
+    public static class NoDronesAssignedException extends RuntimeException {
+        public NoDronesAssignedException(String message) {
             super(message);
         }
     }
