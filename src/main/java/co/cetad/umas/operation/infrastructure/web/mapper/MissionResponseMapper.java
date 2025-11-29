@@ -1,17 +1,18 @@
 package co.cetad.umas.operation.infrastructure.web.mapper;
 
 import co.cetad.umas.operation.domain.model.dto.MissionResponse;
-import co.cetad.umas.operation.domain.model.vo.DroneMission;
+import co.cetad.umas.operation.domain.model.vo.DroneMissionAssignment;
+import co.cetad.umas.operation.domain.model.vo.Mission;
 
-import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /**
  * Mapper funcional de modelo de dominio a DTO de respuesta
  * Mantiene separación entre capas
  *
- * Convierte String IDs (dominio) → UUID IDs (response)
+ * REFACTORIZACIÓN: Ahora mapea Mission + List<DroneMissionAssignment>
  */
 public final class MissionResponseMapper {
 
@@ -20,44 +21,53 @@ public final class MissionResponseMapper {
     }
 
     /**
-     * Convierte entidad de dominio (String IDs) a DTO de respuesta (UUID IDs)
+     * Convierte Mission + sus asignaciones de drones a MissionResponse
+     *
+     * @param mission Misión del dominio
+     * @param assignments Lista de asignaciones de drones a la misión
+     * @return MissionResponse con toda la información
      */
-    public static final Function<DroneMission, MissionResponse> toResponse = mission ->
-            MissionResponse.from(
-                    parseUUID(mission.id()),
-                    mission.name(),
-                    parseUUID(mission.droneId()),
-                    parseNullableUUID(mission.routeId()),
-                    parseUUID(mission.operatorId()),
-                    mission.missionType(),
-                    mission.state(),
-                    mission.startDate(),
-                    mission.createdAt(),
-                    mission.updatedAt(),
-                    mission.hasRoute(),
-                    mission.hasName(),
-                    mission.isScheduledForFuture(),
-                    mission.isManual(),
-                    mission.isPendingApproval()
-            );
+    public static final BiFunction<Mission, List<DroneMissionAssignment>, MissionResponse> toResponse =
+            (mission, assignments) -> {
+                // Mapear asignaciones de drones
+                List<MissionResponse.DroneAssignmentResponse> droneResponses = assignments.stream()
+                        .map(assignment -> new MissionResponse.DroneAssignmentResponse(
+                                UUID.fromString(assignment.id()),
+                                UUID.fromString(assignment.droneId()),
+                                assignment.routeId() != null ? UUID.fromString(assignment.routeId()) : null,
+                                assignment.hasRoute()
+                        ))
+                        .toList();
+
+                return new MissionResponse(
+                        UUID.fromString(mission.id()),
+                        mission.name(),
+                        UUID.fromString(mission.operatorId()),
+                        mission.missionType(),
+                        mission.state(),
+                        mission.estimatedDate(),
+                        mission.startDate(),
+                        mission.endDate(),
+                        droneResponses,
+                        mission.createdAt(),
+                        mission.updatedAt(),
+                        mission.hasName(),
+                        mission.isScheduledForFuture(),
+                        mission.isManual(),
+                        mission.isPendingApproval(),
+                        mission.isInProgress(),
+                        mission.hasStarted(),
+                        mission.hasEnded(),
+                        droneResponses.size()
+                );
+            };
 
     /**
-     * Convierte String a UUID
-     * Lanza excepción si el String no es un UUID válido
+     * Convierte Mission SIN asignaciones a MissionResponse
+     * Útil cuando solo necesitas la misión sin información de drones
      */
-    private static UUID parseUUID(String uuidString) {
-        return UUID.fromString(uuidString);
-    }
-
-    /**
-     * Convierte String a UUID, permitiendo null
-     * Retorna null si el String es null o vacío
-     */
-    private static UUID parseNullableUUID(String uuidString) {
-        return Optional.ofNullable(uuidString)
-                .filter(s -> !s.isBlank())
-                .map(UUID::fromString)
-                .orElse(null);
+    public static MissionResponse toResponseWithoutAssignments(Mission mission) {
+        return toResponse.apply(mission, List.of());
     }
 
 }

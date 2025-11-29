@@ -6,10 +6,13 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
- * DTO de response para misiones de drones
+ * DTO de response para misiones con drones asignados
+ *
+ * REFACTORIZACIÓN: Incluye lista de drones asignados con sus rutas
  */
 public record MissionResponse(
         @JsonProperty("id")
@@ -17,12 +20,6 @@ public record MissionResponse(
 
         @JsonProperty("name")
         String name,
-
-        @JsonProperty("droneId")
-        UUID droneId,
-
-        @JsonProperty("routeId")
-        UUID routeId,
 
         @JsonProperty("operatorId")
         UUID operatorId,
@@ -33,9 +30,20 @@ public record MissionResponse(
         @JsonProperty("state")
         MissionState state,
 
+        @JsonProperty("estimatedDate")
+        @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+        LocalDateTime estimatedDate,
+
         @JsonProperty("startDate")
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
         LocalDateTime startDate,
+
+        @JsonProperty("endDate")
+        @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+        LocalDateTime endDate,
+
+        @JsonProperty("assignedDrones")
+        List<DroneAssignmentResponse> assignedDrones,
 
         @JsonProperty("createdAt")
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
@@ -45,9 +53,7 @@ public record MissionResponse(
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
         LocalDateTime updatedAt,
 
-        @JsonProperty("hasRoute")
-        boolean hasRoute,
-
+        // Helpers computados
         @JsonProperty("hasName")
         boolean hasName,
 
@@ -58,31 +64,36 @@ public record MissionResponse(
         boolean isManual,
 
         @JsonProperty("isPendingApproval")
-        boolean isPendingApproval
+        boolean isPendingApproval,
+
+        @JsonProperty("isInProgress")
+        boolean isInProgress,
+
+        @JsonProperty("hasStarted")
+        boolean hasStarted,
+
+        @JsonProperty("hasEnded")
+        boolean hasEnded,
+
+        @JsonProperty("droneCount")
+        int droneCount
 ) {
 
-    public static MissionResponse from(
-            UUID id,
-            String name,
+    /**
+     * DTO para información de dron asignado a la misión
+     */
+    public record DroneAssignmentResponse(
+            @JsonProperty("assignmentId")
+            UUID assignmentId,
+
+            @JsonProperty("droneId")
             UUID droneId,
+
+            @JsonProperty("routeId")
             UUID routeId,
-            UUID operatorId,
-            MissionOrigin missionType,
-            MissionState state,
-            LocalDateTime startDate,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt,
-            boolean hasRoute,
-            boolean hasName,
-            boolean isScheduledForFuture,
-            boolean isManual,
-            boolean isPendingApproval
-    ) {
-        return new MissionResponse(
-                id, name, droneId, routeId, operatorId,
-                missionType, state, startDate, createdAt, updatedAt,
-                hasRoute, hasName, isScheduledForFuture, isManual, isPendingApproval
-        );
-    }
+
+            @JsonProperty("hasRoute")
+            boolean hasRoute
+    ) {}
 
 }

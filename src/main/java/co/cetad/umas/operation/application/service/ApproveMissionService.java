@@ -1,11 +1,11 @@
 package co.cetad.umas.operation.application.service;
 
 import co.cetad.umas.operation.domain.model.entity.MissionState;
-import co.cetad.umas.operation.domain.model.vo.DroneMission;
+import co.cetad.umas.operation.domain.model.vo.Mission;
 import co.cetad.umas.operation.domain.model.vo.MissionApproval;
 import co.cetad.umas.operation.domain.ports.in.ApproveMissionUseCase;
-import co.cetad.umas.operation.domain.ports.out.DroneMissionRepository;
 import co.cetad.umas.operation.domain.ports.out.MissionApprovalRepository;
+import co.cetad.umas.operation.domain.ports.out.MissionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -13,19 +13,21 @@ import org.springframework.stereotype.Service;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Servicio de aplicación para aprobar misiones de drones
+ * Servicio de aplicación para aprobar misiones
  * Coordina la actualización del estado de la misión y la creación del registro de aprobación
+ *
+ * REFACTORIZACIÓN: Ahora trabaja con Mission
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ApproveMissionService implements ApproveMissionUseCase {
 
-    private final DroneMissionRepository missionRepository;
+    private final MissionRepository missionRepository;
     private final MissionApprovalRepository approvalRepository;
 
     @Override
-    public CompletableFuture<DroneMission> approveMission(
+    public CompletableFuture<Mission> approveMission(
             String missionId,
             String commanderName
     ) {
@@ -40,7 +42,7 @@ public class ApproveMissionService implements ApproveMissionUseCase {
                                 "Mission not found with id: " + missionId);
                     }
 
-                    DroneMission mission = missionOpt.get();
+                    Mission mission = missionOpt.get();
                     return validateMissionState(mission)
                             .thenCompose(validatedMission -> approveMissionFlow(validatedMission, commanderName));
                 })
@@ -76,7 +78,7 @@ public class ApproveMissionService implements ApproveMissionUseCase {
     /**
      * Valida que la misión esté en estado PENDIENTE_APROBACION
      */
-    private CompletableFuture<DroneMission> validateMissionState(DroneMission mission) {
+    private CompletableFuture<Mission> validateMissionState(Mission mission) {
         return CompletableFuture.supplyAsync(() -> {
             if (mission.state() != MissionState.PENDIENTE_APROBACION) {
                 log.warn("⚠️ Mission {} is not in PENDIENTE_APROBACION state. Current state: {}",
@@ -93,12 +95,12 @@ public class ApproveMissionService implements ApproveMissionUseCase {
     /**
      * Flujo de aprobación: actualiza el estado y crea el registro
      */
-    private CompletableFuture<DroneMission> approveMissionFlow(
-            DroneMission mission,
+    private CompletableFuture<Mission> approveMissionFlow(
+            Mission mission,
             String commanderName
     ) {
         // Cambiar estado a APROBADA
-        DroneMission approvedMission = mission.withState(MissionState.APROBADA);
+        Mission approvedMission = mission.withState(MissionState.APROBADA);
 
         return missionRepository.save(approvedMission)
                 .thenCompose(savedMission ->
@@ -111,7 +113,7 @@ public class ApproveMissionService implements ApproveMissionUseCase {
      * Crea el registro de aprobación
      */
     private CompletableFuture<MissionApproval> createApprovalRecord(
-            DroneMission mission,
+            Mission mission,
             String commanderName
     ) {
         log.debug("Creating approval record for mission: {} by commander: {}",
@@ -134,6 +136,8 @@ public class ApproveMissionService implements ApproveMissionUseCase {
                     );
                 });
     }
+
+    // ========== Excepciones personalizadas ==========
 
     public static class MissionNotFoundException extends RuntimeException {
         public MissionNotFoundException(String message) {

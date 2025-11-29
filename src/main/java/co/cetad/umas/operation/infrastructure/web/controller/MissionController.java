@@ -1,16 +1,18 @@
 package co.cetad.umas.operation.infrastructure.web.controller;
 
 import co.cetad.umas.operation.application.service.ApproveMissionService;
-import co.cetad.umas.operation.application.service.DroneMissionService;
+import co.cetad.umas.operation.application.service.CreateMissionService;
 import co.cetad.umas.operation.application.service.ExecuteMissionService;
 import co.cetad.umas.operation.domain.model.dto.ApproveMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.CreateMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.ExecuteMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.MissionResponse;
-import co.cetad.umas.operation.domain.model.vo.DroneMission;
+import co.cetad.umas.operation.domain.model.vo.DroneMissionAssignment;
+import co.cetad.umas.operation.domain.model.vo.Mission;
 import co.cetad.umas.operation.domain.ports.in.ApproveMissionUseCase;
-import co.cetad.umas.operation.domain.ports.in.CreateDroneMissionUseCase;
+import co.cetad.umas.operation.domain.ports.in.CreateMissionUseCase;
 import co.cetad.umas.operation.domain.ports.in.ExecuteMissionUseCase;
+import co.cetad.umas.operation.domain.ports.out.DroneMissionAssignmentRepository;
 import co.cetad.umas.operation.infrastructure.web.mapper.MissionResponseMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,37 +23,51 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
 /**
- * Controller REST para misiones de drones
+ * Controller REST para misiones con múltiples drones
+ *
+ * REFACTORIZACIÓN: Ahora trabaja con Mission + DroneMissionAssignment
  *
  * Endpoints:
- * - POST /api/v1/missions - Crear nueva misión manual
- * - POST /api/v1/missions/{id}/approve - Aprobar misión
- * - POST /api/v1/missions/{id}/execute - Ejecutar misión (envía waypoints a Kafka)
+ * - POST /api/v1/missions                  - Crear misión con drones asignados
+ * - POST /api/v1/missions/{id}/approve     - Aprobar misión
+ * - POST /api/v1/missions/{id}/execute     - Ejecutar misión (todos los drones)
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/missions")
 @RequiredArgsConstructor
-public class DroneMissionController {
+public class MissionController {
 
-    private final CreateDroneMissionUseCase createMissionUseCase;
+    private final CreateMissionUseCase createMissionUseCase;
     private final ApproveMissionUseCase approveMissionUseCase;
     private final ExecuteMissionUseCase executeMissionUseCase;
+    private final DroneMissionAssignmentRepository assignmentRepository;
 
     /**
-     * Crea una nueva misión manual
+     * Crea una nueva misión con múltiples drones asignados
      *
      * POST /api/v1/missions
      *
      * Body:
      * {
-     *   "name": "Misión de Reconocimiento",
-     *   "droneId": "550e8400-e29b-41d4-a716-446655440000",
-     *   "routeId": "650e8400-e29b-41d4-a716-446655440000",
-     *   "operatorId": "750e8400-e29b-41d4-a716-446655440000",
+     *   "name": "Patrullaje Zona Norte",
+     *   "operatorId": "550e8400-e29b-41d4-a716-446655440000",
      *   "commanderName": "Juan Pérez",
-     *   "startDate": "2025-11-22T10:00:00"
+     *   "estimatedDate": "2025-11-30T10:00:00",
+     *   "droneAssignments": [
+     *     {
+     *       "droneId": "650e8400-e29b-41d4-a716-446655440001",
+     *       "routeId": "750e8400-e29b-41d4-a716-446655440001"
+     *     },
+     *     {
+     *       "droneId": "650e8400-e29b-41d4-a716-446655440002",
+     *       "routeId": "750e8400-e29b-41d4-a716-446655440002"
+     *     }
+     *   ]
      * }
      */
     @PostMapping(
@@ -61,23 +77,26 @@ public class DroneMissionController {
     public Mono<ResponseEntity<MissionResponse>> createMission(
             @Valid @RequestBody CreateMissionRequest request
     ) {
-        log.info("POST /api/v1/missions - Creating mission for drone: {} by commander: {}",
-                request.droneId(), request.commanderName());
+        log.info("POST /api/v1/missions - Creating mission with {} drone(s) by commander: {}",
+                request.droneAssignments().size(), request.commanderName());
+
+        Mission mission = buildMission(request);
+        List<DroneMissionAssignment> assignments = buildDroneAssignments(mission.id(), request);
 
         return Mono.fromFuture(
                         createMissionUseCase.createMission(
-                                buildMission(request),
-                                request.commanderName()
+                                mission,
+                                request.commanderName(),
+                                assignments
                         )
                 )
-                .map(MissionResponseMapper.toResponse)
+                .flatMap(this::loadAssignmentsAndMap)
                 .map(response -> ResponseEntity.status(HttpStatus.CREATED).body(response))
                 .doOnSuccess(response ->
-                        log.info("✅ Mission created successfully: {}",
-                                extractResponseId(response)))
+                        log.info("✅ Mission created successfully: {} with {} drone(s)",
+                                extractResponseId(response), request.droneAssignments().size()))
                 .doOnError(error ->
-                        log.error("❌ Error creating mission for drone: {}",
-                                request.droneId(), error))
+                        log.error("❌ Error creating mission", error))
                 .onErrorResume(this::handleCreateError);
     }
 
@@ -90,13 +109,9 @@ public class DroneMissionController {
      * {
      *   "commanderName": "María García"
      * }
-     *
-     * @param id ID de la misión a aprobar (UUID como String)
-     * @param request Request con el nombre del comandante que aprueba
-     * @return Misión aprobada con estado APROBADA
      */
     @PostMapping(
-            value = "/approve/{id}",
+            value = "/{id}/approve",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
@@ -110,7 +125,7 @@ public class DroneMissionController {
         return Mono.fromFuture(
                         approveMissionUseCase.approveMission(id, request.commanderName())
                 )
-                .map(MissionResponseMapper.toResponse)
+                .flatMap(this::loadAssignmentsAndMap)
                 .map(ResponseEntity::ok)
                 .doOnSuccess(response ->
                         log.info("✅ Mission approved successfully: {} by commander: {}",
@@ -121,8 +136,7 @@ public class DroneMissionController {
     }
 
     /**
-     * Ejecuta una misión aprobada
-     * Busca la ruta asociada, extrae los waypoints del GeoJSON y los envía a Kafka
+     * Ejecuta una misión aprobada (envía comandos a TODOS los drones asignados)
      *
      * POST /api/v1/missions/{id}/execute
      *
@@ -130,13 +144,9 @@ public class DroneMissionController {
      * {
      *   "commanderName": "Carlos Rodríguez"
      * }
-     *
-     * @param id ID de la misión a ejecutar (UUID como String)
-     * @param request Request con el nombre del comandante que autoriza la ejecución
-     * @return Misión en ejecución con estado EN_EJECUCION
      */
     @PostMapping(
-            value = "/execute/{id}",
+            value = "/{id}/execute",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
@@ -150,7 +160,7 @@ public class DroneMissionController {
         return Mono.fromFuture(
                         executeMissionUseCase.executeMission(id, request.commanderName())
                 )
-                .map(MissionResponseMapper.toResponse)
+                .flatMap(this::loadAssignmentsAndMap)
                 .map(ResponseEntity::ok)
                 .doOnSuccess(response ->
                         log.info("✅ Mission executed successfully: {} by commander: {}",
@@ -162,16 +172,39 @@ public class DroneMissionController {
 
     /**
      * Construye la misión desde el request
-     * Los IDs ya vienen validados como UUIDs en el CreateMissionRequest
      */
-    private DroneMission buildMission(CreateMissionRequest request) {
-        return DroneMission.createManual(
+    private Mission buildMission(CreateMissionRequest request) {
+        return Mission.createManual(
                 request.name(),
-                request.droneId(),      // String UUID
-                request.routeId(),      // String UUID (puede ser null)
-                request.operatorId(),   // String UUID
-                request.startDate()
+                request.operatorId(),  // String UUID
+                request.estimatedDate()
         );
+    }
+
+    /**
+     * Construye las asignaciones de drones desde el request
+     */
+    private List<DroneMissionAssignment> buildDroneAssignments(
+            String missionId,
+            CreateMissionRequest request
+    ) {
+        return request.droneAssignments().stream()
+                .map(droneReq -> DroneMissionAssignment.create(
+                        missionId,
+                        droneReq.droneId(),
+                        droneReq.routeId()
+                ))
+                .toList();
+    }
+
+    /**
+     * Carga las asignaciones de drones y mapea a response
+     */
+    private Mono<MissionResponse> loadAssignmentsAndMap(Mission mission) {
+        return Mono.fromFuture(
+                        assignmentRepository.findByMissionId(mission.id())
+                )
+                .map(assignments -> MissionResponseMapper.toResponse.apply(mission, assignments));
     }
 
     /**
@@ -192,9 +225,13 @@ public class DroneMissionController {
                 log.warn("⚠️ Invalid request: {}", e.getMessage());
                 yield Mono.just(ResponseEntity.badRequest().build());
             }
-            case DroneMissionService.MissionCreationException e -> {
+            case CreateMissionService.MissionCreationException e -> {
                 log.error("❌ Mission creation failed", e);
                 yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
+            }
+            case CreateMissionService.DroneAssignmentException e -> {
+                log.error("❌ Drone assignment failed", e);
+                yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
             }
             default -> {
                 log.error("❌ Unexpected error creating mission", error);
@@ -229,7 +266,6 @@ public class DroneMissionController {
 
     /**
      * Maneja errores de ejecución de misión con pattern matching
-     * Incluye nuevas excepciones de validación de ruta y publicación a Kafka
      */
     private Mono<ResponseEntity<MissionResponse>> handleExecuteError(Throwable error, String missionId) {
         return switch (error) {
@@ -240,6 +276,10 @@ public class DroneMissionController {
             case ExecuteMissionService.MissionNotFoundException e -> {
                 log.warn("⚠️ Mission not found: {}", missionId);
                 yield Mono.just(ResponseEntity.notFound().build());
+            }
+            case ExecuteMissionService.NoDronesAssignedException e -> {
+                log.warn("⚠️ No drones assigned to mission: {}", missionId);
+                yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
             }
             case ExecuteMissionService.DroneNotFoundException e -> {
                 log.warn("⚠️ Drone not found for mission: {}", missionId);
@@ -255,10 +295,6 @@ public class DroneMissionController {
             }
             case ExecuteMissionService.MissionScheduledForFutureException e -> {
                 log.warn("⚠️ Mission scheduled for future: {}", missionId);
-                yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
-            }
-            case ExecuteMissionService.MissingRouteException e -> {
-                log.warn("⚠️ Mission has no route assigned: {}", missionId);
                 yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
             }
             case ExecuteMissionService.InvalidRouteException e -> {
