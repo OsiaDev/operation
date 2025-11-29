@@ -5,14 +5,15 @@ import co.cetad.umas.operation.domain.model.entity.MissionState;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * DTO de response para misiones con drones asignados
+ * DTO de response para misiones con información completa de drones asignados
  *
- * REFACTORIZACIÓN: Incluye lista de drones asignados con sus rutas
+ * REFACTORIZACIÓN: Ahora incluye toda la información del dron, no solo IDs
  */
 public record MissionResponse(
         @JsonProperty("id")
@@ -80,7 +81,8 @@ public record MissionResponse(
 ) {
 
     /**
-     * DTO para información de dron asignado a la misión
+     * DTO para información completa de dron asignado a la misión
+     * Incluye todos los atributos del dron para evitar consultas adicionales
      */
     public record DroneAssignmentResponse(
             @JsonProperty("assignmentId")
@@ -88,6 +90,35 @@ public record MissionResponse(
 
             @JsonProperty("droneId")
             UUID droneId,
+
+            @JsonProperty("droneName")
+            String droneName,
+
+            @JsonProperty("vehicleId")
+            String vehicleId,
+
+            @JsonProperty("model")
+            String model,
+
+            @JsonProperty("description")
+            String description,
+
+            @JsonProperty("serialNumber")
+            String serialNumber,
+
+            @JsonProperty("droneStatus")
+            String droneStatus,
+
+            @JsonProperty("flightHours")
+            BigDecimal flightHours,
+
+            @JsonProperty("droneCreatedAt")
+            @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+            LocalDateTime droneCreatedAt,
+
+            @JsonProperty("droneUpdatedAt")
+            @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+            LocalDateTime droneUpdatedAt,
 
             @JsonProperty("routeId")
             UUID routeId,

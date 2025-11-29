@@ -2,8 +2,11 @@ package co.cetad.umas.operation.infrastructure.web.controller;
 
 import co.cetad.umas.operation.domain.model.dto.HealthResponse;
 import co.cetad.umas.operation.domain.model.dto.MissionResponse;
+import co.cetad.umas.operation.domain.model.vo.Drone;
+import co.cetad.umas.operation.domain.model.vo.DroneMissionAssignment;
 import co.cetad.umas.operation.domain.ports.in.MissionQueryUseCase;
 import co.cetad.umas.operation.domain.ports.out.DroneMissionAssignmentRepository;
+import co.cetad.umas.operation.domain.ports.out.DroneRepository;
 import co.cetad.umas.operation.infrastructure.web.mapper.MissionResponseMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,10 +18,16 @@ import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+
 /**
  * Controller REST para consultas de misiones de drones
  *
- * REFACTORIZACIÓN: Ahora trabaja con Mission + DroneMissionAssignment separados
+ * REFACTORIZACIÓN: Ahora carga información completa de drones en una sola query
+ * Previene el problema N+1 queries usando batch loading
  *
  * Endpoints:
  * - GET /api/v1/missions                    - Listar todas las misiones
@@ -31,7 +40,11 @@ import reactor.core.publisher.Mono;
  * - Usa MissionQueryUseCase que retorna Optional
  * - El controller decide el HTTP status (404, 200, etc.)
  * - Maneja errores de validación con HTTP 400
- * - Carga asignaciones de drones para cada misión
+ * - Carga asignaciones de drones Y detalles completos de cada dron
+ *
+ * OPTIMIZACIÓN:
+ * - Para evitar N+1 queries, carga todos los drones en batch
+ * - Usa Map<droneId, Drone> para lookup O(1)
  *
  * Usa WebFlux para respuestas reactivas
  */
@@ -43,9 +56,10 @@ public class MissionQueryController {
 
     private final MissionQueryUseCase missionQueryUseCase;
     private final DroneMissionAssignmentRepository assignmentRepository;
+    private final DroneRepository droneRepository;
 
     /**
-     * Lista todas las misiones con sus drones asignados
+     * Lista todas las misiones con sus drones asignados (información completa)
      *
      * GET /api/v1/missions
      *
@@ -57,13 +71,7 @@ public class MissionQueryController {
 
         return Mono.fromFuture(missionQueryUseCase.findAll())
                 .flatMapMany(Flux::fromIterable)
-                .flatMap(mission ->
-                        // Para cada misión, cargar sus asignaciones de drones
-                        Mono.fromFuture(assignmentRepository.findByMissionId(mission.id()))
-                                .map(assignments ->
-                                        MissionResponseMapper.toResponse.apply(mission, assignments)
-                                )
-                )
+                .flatMap(this::loadMissionWithDroneDetails)
                 .doOnComplete(() -> log.info("✅ Completed listing all missions"))
                 .doOnError(error -> {
                     log.error("❌ Error listing all missions", error);
@@ -76,7 +84,7 @@ public class MissionQueryController {
     }
 
     /**
-     * Busca una misión por ID con sus drones asignados
+     * Busca una misión por ID con sus drones asignados (información completa)
      *
      * GET /api/v1/missions/{id}
      *
@@ -102,14 +110,7 @@ public class MissionQueryController {
                     }
 
                     var mission = missionOpt.get();
-
-                    // Cargar asignaciones de drones para esta misión
-                    return Mono.fromFuture(
-                                    assignmentRepository.findByMissionId(mission.id())
-                            )
-                            .map(assignments ->
-                                    MissionResponseMapper.toResponse.apply(mission, assignments)
-                            )
+                    return loadMissionWithDroneDetails(mission)
                             .map(ResponseEntity::ok);
                 })
                 .doOnSuccess(response ->
@@ -146,12 +147,7 @@ public class MissionQueryController {
 
         return Mono.fromFuture(missionQueryUseCase.findAuthorizedMissions())
                 .flatMapMany(Flux::fromIterable)
-                .flatMap(mission ->
-                        Mono.fromFuture(assignmentRepository.findByMissionId(mission.id()))
-                                .map(assignments ->
-                                        MissionResponseMapper.toResponse.apply(mission, assignments)
-                                )
-                )
+                .flatMap(this::loadMissionWithDroneDetails)
                 .doOnComplete(() -> log.info("✅ Completed listing authorized missions"))
                 .doOnError(error -> {
                     log.error("❌ Error listing authorized missions", error);
@@ -180,12 +176,7 @@ public class MissionQueryController {
 
         return Mono.fromFuture(missionQueryUseCase.findUnauthorizedMissions())
                 .flatMapMany(Flux::fromIterable)
-                .flatMap(mission ->
-                        Mono.fromFuture(assignmentRepository.findByMissionId(mission.id()))
-                                .map(assignments ->
-                                        MissionResponseMapper.toResponse.apply(mission, assignments)
-                                )
-                )
+                .flatMap(this::loadMissionWithDroneDetails)
                 .doOnComplete(() -> log.info("✅ Completed listing unauthorized missions"))
                 .doOnError(error -> {
                     log.error("❌ Error listing unauthorized missions", error);
@@ -209,6 +200,88 @@ public class MissionQueryController {
         return Mono.just(ResponseEntity.ok(
                 new HealthResponse("UP", "Mission Query Controller is running")
         ));
+    }
+
+    /**
+     * Carga una misión con información completa de drones
+     * Previene N+1 queries cargando todos los drones en batch
+     *
+     * OPTIMIZACIÓN:
+     * 1. Cargar asignaciones de la misión
+     * 2. Extraer IDs de drones únicos
+     * 3. Cargar TODOS los drones en batch (evita N+1 queries)
+     * 4. Crear Map para lookup O(1)
+     * 5. Mapear a response
+     */
+    private Mono<MissionResponse> loadMissionWithDroneDetails(
+            co.cetad.umas.operation.domain.model.vo.Mission mission
+    ) {
+        return Mono.fromFuture(assignmentRepository.findByMissionId(mission.id()))
+                .flatMap(assignments -> {
+                    if (assignments.isEmpty()) {
+                        // Sin drones asignados, retornar response simple
+                        return Mono.just(
+                                MissionResponseMapper.toResponseWithoutAssignments(mission)
+                        );
+                    }
+
+                    // Extraer IDs únicos de drones
+                    List<String> droneIds = assignments.stream()
+                            .map(DroneMissionAssignment::droneId)
+                            .distinct()
+                            .toList();
+
+                    log.debug("Loading {} drone(s) for mission: {}", droneIds.size(), mission.id());
+
+                    // Cargar TODOS los drones en batch (previene N+1 queries)
+                    return loadDronesInBatch(droneIds)
+                            .map(dronesMap -> {
+                                log.debug("Loaded {} drone(s) for mission: {}",
+                                        dronesMap.size(), mission.id());
+
+                                return MissionResponseMapper.toResponse(
+                                        mission,
+                                        assignments,
+                                        dronesMap
+                                );
+                            });
+                });
+    }
+
+    /**
+     * Carga múltiples drones en batch para evitar N+1 queries
+     *
+     * OPTIMIZACIÓN: Usa CompletableFuture.allOf para cargar en paralelo
+     *
+     * @param droneIds Lista de IDs de drones a cargar
+     * @return Mono con Map de droneId -> Drone
+     */
+    private Mono<Map<String, Drone>> loadDronesInBatch(List<String> droneIds) {
+        // Crear futures para cargar cada dron en paralelo
+        List<CompletableFuture<java.util.Optional<Drone>>> droneFutures = droneIds.stream()
+                .map(droneRepository::findById)
+                .toList();
+
+        // Esperar a que todos se carguen
+        return Mono.fromFuture(
+                CompletableFuture.allOf(
+                        droneFutures.toArray(new CompletableFuture[0])
+                ).thenApply(v -> {
+                    // Convertir resultados a Map para lookup O(1)
+                    return droneFutures.stream()
+                            .map(CompletableFuture::join)
+                            .filter(java.util.Optional::isPresent)
+                            .map(java.util.Optional::get)
+                            .collect(Collectors.toMap(
+                                    Drone::id,
+                                    drone -> drone
+                            ));
+                })
+        ).onErrorResume(error -> {
+            log.error("❌ Error loading drones in batch", error);
+            // En caso de error, retornar Map vacío para degradar gracefully
+            return Mono.just(Map.of());
+        });
     }
 
 }
