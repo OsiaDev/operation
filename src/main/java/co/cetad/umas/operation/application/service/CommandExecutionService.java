@@ -4,7 +4,7 @@ import co.cetad.umas.operation.domain.model.dto.ExecutionCommand;
 import co.cetad.umas.operation.domain.ports.in.ExecuteCommandUseCase;
 import co.cetad.umas.operation.domain.ports.out.CommandExecutionPublisher;
 import co.cetad.umas.operation.domain.ports.out.DroneRepository;
-import co.cetad.umas.operation.domain.ports.out.DroneMissionRepository;
+import co.cetad.umas.operation.domain.ports.out.MissionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,7 +24,7 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class CommandExecutionService implements ExecuteCommandUseCase {
 
-    private final DroneMissionRepository missionRepository;
+    private final MissionRepository missionRepository;
     private final DroneRepository droneRepository;
     private final CommandExecutionPublisher commandPublisher;
 

@@ -1,9 +1,7 @@
 package co.cetad.umas.operation.application.service;
 
 import co.cetad.umas.operation.domain.model.entity.MissionOrigin;
-import co.cetad.umas.operation.domain.model.vo.DroneMission;
 import co.cetad.umas.operation.domain.ports.in.MissionQueryUseCase;
-import co.cetad.umas.operation.domain.ports.out.DroneMissionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

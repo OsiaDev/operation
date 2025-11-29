@@ -1,7 +1,5 @@
 package co.cetad.umas.operation.domain.ports.in;
 
-import co.cetad.umas.operation.domain.model.vo.DroneMission;
-
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
