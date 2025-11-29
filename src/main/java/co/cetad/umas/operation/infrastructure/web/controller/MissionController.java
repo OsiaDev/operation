@@ -111,7 +111,7 @@ public class MissionController {
      * }
      */
     @PostMapping(
-            value = "/{id}/approve",
+            value = "/approve/{id}",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
@@ -119,7 +119,7 @@ public class MissionController {
             @PathVariable String id,
             @Valid @RequestBody ApproveMissionRequest request
     ) {
-        log.info("POST /api/v1/missions/{}/approve - Approving mission by commander: {}",
+        log.info("POST /api/v1/missions/approve/{} - Approving mission by commander: {}",
                 id, request.commanderName());
 
         return Mono.fromFuture(
@@ -146,7 +146,7 @@ public class MissionController {
      * }
      */
     @PostMapping(
-            value = "/{id}/execute",
+            value = "/execute/{id}",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
@@ -154,7 +154,7 @@ public class MissionController {
             @PathVariable String id,
             @Valid @RequestBody ExecuteMissionRequest request
     ) {
-        log.info("POST /api/v1/missions/{}/execute - Executing mission by commander: {}",
+        log.info("POST /api/v1/missions/execute/{} - Executing mission by commander: {}",
                 id, request.commanderName());
 
         return Mono.fromFuture(
