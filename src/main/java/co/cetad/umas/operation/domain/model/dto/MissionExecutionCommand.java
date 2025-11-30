@@ -10,7 +10,7 @@ import java.util.Objects;
  * DTO para enviar comando de ejecución de misión a través de Kafka
  * Contiene la información de TODOS los drones asignados a la misión con sus rutas
  *
- * REFACTORIZACIÓN: Ahora envía lista de drones con sus respectivos waypoints
+ * REFACTORIZACIÓN: Ahora envía lista de drones con sus respectivos waypoints y routeId
  * en lugar de un comando por dron
  */
 public record MissionExecutionCommand(
@@ -54,9 +54,12 @@ public record MissionExecutionCommand(
 
     /**
      * DTO que representa la ejecución de un dron específico con su ruta
+     *
+     * ACTUALIZACIÓN: Ahora incluye routeId para identificar la ruta asignada
      */
     public record DroneExecution(
             @JsonProperty("vehicleId") String vehicleId,
+            @JsonProperty("routeId") String routeId,
             @JsonProperty("waypoints") List<Waypoint> waypoints
     ) {
         public DroneExecution {
@@ -66,21 +69,22 @@ public record MissionExecutionCommand(
             if (vehicleId.isBlank()) {
                 throw new IllegalArgumentException("Vehicle ID cannot be empty");
             }
+            // routeId puede ser null (drones sin ruta asignada)
             // Permitir lista vacía de waypoints (drones sin ruta asignada)
         }
 
         /**
-         * Factory method para crear ejecución de dron con waypoints
+         * Factory method para crear ejecución de dron con waypoints y routeId
          */
-        public static DroneExecution create(String vehicleId, List<Waypoint> waypoints) {
-            return new DroneExecution(vehicleId, waypoints);
+        public static DroneExecution create(String vehicleId, String routeId, List<Waypoint> waypoints) {
+            return new DroneExecution(vehicleId, routeId, waypoints);
         }
 
         /**
-         * Factory method para crear ejecución de dron sin waypoints
+         * Factory method para crear ejecución de dron sin waypoints ni ruta
          */
         public static DroneExecution createWithoutRoute(String vehicleId) {
-            return new DroneExecution(vehicleId, List.of());
+            return new DroneExecution(vehicleId, null, List.of());
         }
 
         /**
@@ -88,6 +92,13 @@ public record MissionExecutionCommand(
          */
         public boolean hasWaypoints() {
             return !waypoints.isEmpty();
+        }
+
+        /**
+         * Verifica si el dron tiene ruta asignada
+         */
+        public boolean hasRoute() {
+            return routeId != null && !routeId.isBlank();
         }
     }
 

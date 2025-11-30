@@ -1,48 +1,46 @@
 package co.cetad.umas.operation.infrastructure.redis.config;
 
+import co.cetad.umas.operation.domain.model.vo.Drone;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
-import com.fasterxml.jackson.databind.jsontype.PolymorphicTypeValidator;
-import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.data.redis.cache.RedisCacheConfiguration;
-import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
-import org.springframework.data.redis.serializer.RedisSerializationContext;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.time.Duration;
 import java.util.Locale;
 
 /**
- * Configuración de Redis Cache SOLO para tabla de drones
+ * Configuración de Redis SOLO para tabla de drones
  *
  * Cache Strategy:
  * - ✅ Drones: Cacheados por vehicleId (evita consultas repetidas en flujo de telemetría)
  * - ❌ Telemetría: NO se cachea (toda telemetría entrante debe almacenarse en BD)
  *
- * SOLUCIÓN AL PROBLEMA DE SERIALIZACIÓN:
- * - Cache almacena Drone directamente (no Optional<Drone>)
- * - ObjectMapper configurado con Jdk8Module para manejo de Optional cuando sea necesario
- * - PolymorphicTypeValidator para seguridad en deserialización
+ * SOLUCIÓN DEFINITIVA AL PROBLEMA DE SERIALIZACIÓN:
+ * - Usa RedisTemplate con Jackson2JsonRedisSerializer tipado específicamente para Drone
+ * - NO usa GenericJackson2JsonRedisSerializer que causa problemas con LinkedHashMap
+ * - ObjectMapper configurado para manejar records de Java 21
+ * - TTL de 30 minutos para drones
  */
 @Configuration
 @EnableCaching
 @ConditionalOnClass(RedisConnectionFactory.class)
 public class RedisCacheConfig {
 
+    private static final Duration DRONE_CACHE_TTL = Duration.ofMinutes(30);
+
     /**
      * Configura ObjectMapper específico para Redis con:
-     * - Jdk8Module: Soporte para Optional, OptionalInt, etc.
      * - JavaTimeModule: Soporte para LocalDateTime, etc.
-     * - PolymorphicTypeValidator: Seguridad en deserialización
      * - Locale.US: Punto decimal para números
+     * - Configuración para records de Java 21
      *
      * @return ObjectMapper configurado para Redis
      */
@@ -50,8 +48,7 @@ public class RedisCacheConfig {
     public ObjectMapper redisObjectMapper() {
         ObjectMapper mapper = new ObjectMapper();
 
-        // Registrar módulos necesarios
-        mapper.registerModule(new Jdk8Module());
+        // Registrar módulo de tiempo
         mapper.registerModule(new JavaTimeModule());
 
         // Configurar formato de fechas
@@ -60,60 +57,55 @@ public class RedisCacheConfig {
         // Configurar locale US para punto decimal
         mapper.setLocale(Locale.US);
 
-        // Configurar type validator para seguridad
-        PolymorphicTypeValidator ptv = BasicPolymorphicTypeValidator.builder()
-                .allowIfBaseType(Object.class)
-                .build();
-        mapper.activateDefaultTyping(ptv, ObjectMapper.DefaultTyping.NON_FINAL);
-
         return mapper;
     }
 
     /**
-     * Configura RedisCacheManager con serialización JSON usando ObjectMapper configurado
+     * Configura RedisTemplate específicamente tipado para Drone
+     * Esto evita problemas de deserialización con LinkedHashMap
      *
-     * Cache "droneCache":
-     * - TTL: 30 minutos (drones no cambian frecuentemente)
-     * - Key: vehicleId (usado en findByVehicleId)
-     * - Value: Drone serializado directamente (NO Optional<Drone>)
+     * USO:
+     * - Key: vehicleId (String)
+     * - Value: Drone (record)
+     * - TTL: 30 minutos (configurado en el adaptador)
      *
      * @param connectionFactory Factory de conexiones Redis
      * @param redisObjectMapper ObjectMapper configurado para Redis
-     * @return RedisCacheManager configurado solo para drones
+     * @return RedisTemplate tipado para String keys y Drone values
      */
     @Bean
-    public RedisCacheManager cacheManager(
+    public RedisTemplate<String, Drone> droneRedisTemplate(
             RedisConnectionFactory connectionFactory,
             ObjectMapper redisObjectMapper
     ) {
-        // Crear serializer con el ObjectMapper configurado
-        GenericJackson2JsonRedisSerializer jsonSerializer =
-                new GenericJackson2JsonRedisSerializer(redisObjectMapper);
+        RedisTemplate<String, Drone> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
 
-        // Configuración base de cache
-        RedisCacheConfiguration baseConfig = RedisCacheConfiguration.defaultCacheConfig()
-                .disableCachingNullValues()      // No cachear valores null
-                .serializeKeysWith(
-                        RedisSerializationContext.SerializationPair
-                                .fromSerializer(new StringRedisSerializer())
-                )
-                .serializeValuesWith(
-                        RedisSerializationContext.SerializationPair
-                                .fromSerializer(jsonSerializer)
-                );
+        // Serializer para keys (String)
+        StringRedisSerializer keySerializer = new StringRedisSerializer();
 
-        // Configuración específica para cache de drones
-        // IMPORTANTE: Almacena Drone directamente, NO Optional<Drone>
-        RedisCacheConfiguration droneConfig = baseConfig
-                .entryTtl(Duration.ofMinutes(30))  // TTL de 30 minutos
-                .prefixCacheNameWith("umas:drone:");  // Prefijo para keys
+        // Serializer para values (Drone) - TIPADO ESPECÍFICAMENTE
+        // Esto garantiza que Redis deserialice correctamente como Drone
+        Jackson2JsonRedisSerializer<Drone> valueSerializer =
+                new Jackson2JsonRedisSerializer<>(redisObjectMapper, Drone.class);
 
-        return RedisCacheManager.builder(connectionFactory)
-                .cacheDefaults(baseConfig.entryTtl(Duration.ofHours(1)))
-                // Cache SOLO para drones
-                .withCacheConfiguration("droneCache", droneConfig)
-                // NO configuramos cache para telemetría - debe guardarse siempre
-                .build();
+        // Configurar serializers
+        template.setKeySerializer(keySerializer);
+        template.setValueSerializer(valueSerializer);
+        template.setHashKeySerializer(keySerializer);
+        template.setHashValueSerializer(valueSerializer);
+
+        template.afterPropertiesSet();
+
+        return template;
+    }
+
+    /**
+     * Getter para TTL de cache de drones
+     * Usado por el adaptador para configurar expiración
+     */
+    public static Duration getDroneCacheTtl() {
+        return DRONE_CACHE_TTL;
     }
 
 }

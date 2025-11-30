@@ -19,8 +19,8 @@ import java.util.concurrent.CompletableFuture;
  * REFACTORIZACIÓN: Ahora coordina:
  * 1. Validación de la misión
  * 2. Búsqueda de TODOS los drones asignados a la misión
- * 3. Para cada dron: buscar ruta, extraer waypoints
- * 4. Construir lista de DroneExecution (vehicleId + waypoints)
+ * 3. Para cada dron: buscar ruta, extraer waypoints, incluir routeId
+ * 4. Construir lista de DroneExecution (vehicleId + routeId + waypoints)
  * 5. Publicar UN SOLO mensaje con todos los drones
  * 6. Actualización del estado de la misión a EN_EJECUCION
  */
@@ -116,12 +116,12 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
     /**
      * Flujo de ejecución completo:
      * 1. Buscar TODOS los drones asignados a la misión
-     * 2. Para cada dron: obtener vehicleId, buscar ruta, extraer waypoints
-     * 3. Construir lista de DroneExecution
+     * 2. Para cada dron: obtener vehicleId, buscar ruta, extraer waypoints, incluir routeId
+     * 3. Construir lista de DroneExecution con vehicleId, routeId y waypoints
      * 4. Publicar UN SOLO comando con todos los drones
      * 5. Actualizar estado de la misión a EN_EJECUCION con start_date
      *
-     * REFACTORIZACIÓN: Ahora envía un solo mensaje con todos los drones
+     * ACTUALIZACIÓN: Ahora incluye routeId en cada DroneExecution
      */
     private CompletableFuture<Mission> executeMissionFlow(Mission mission) {
         log.info("🚀 Starting execution flow for mission: {}", mission.id());
@@ -161,9 +161,10 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
 
     /**
      * Construye la lista de DroneExecution procesando todas las asignaciones en paralelo
-     * Cada DroneExecution contiene el vehicleId del dron y sus waypoints
+     * Cada DroneExecution contiene el vehicleId, routeId y waypoints del dron
      *
      * OPTIMIZACIÓN: Procesa todos los drones en paralelo
+     * ACTUALIZACIÓN: Ahora incluye routeId en cada DroneExecution
      *
      * @param mission Misión a ejecutar
      * @param assignments Lista de asignaciones de drones
@@ -210,8 +211,8 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
     /**
      * Construye un DroneExecution para una asignación específica:
      * 1. Buscar dron para obtener vehicleId
-     * 2. Si tiene ruta: buscar ruta, extraer waypoints
-     * 3. Crear DroneExecution con vehicleId y waypoints
+     * 2. Si tiene ruta: buscar ruta, extraer waypoints, incluir routeId
+     * 3. Crear DroneExecution con vehicleId, routeId y waypoints
      *
      * @param assignment Asignación de dron a procesar
      * @return CompletableFuture con DroneExecution
@@ -251,9 +252,11 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
     /**
      * Carga los waypoints de la ruta asignada a un dron
      *
+     * ACTUALIZACIÓN: Ahora incluye el routeId en el DroneExecution
+     *
      * @param drone Dron al que se le asignará la ruta
      * @param routeId ID de la ruta a cargar
-     * @return CompletableFuture con DroneExecution que incluye waypoints
+     * @return CompletableFuture con DroneExecution que incluye vehicleId, routeId y waypoints
      */
     private CompletableFuture<MissionExecutionCommand.DroneExecution> loadWaypointsForDrone(
             Drone drone,
@@ -287,9 +290,10 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
                                 "Failed to parse GeoJSON for route: " + route.id(), e);
                     }
 
-                    // Crear DroneExecution con waypoints
+                    // Crear DroneExecution con vehicleId, routeId y waypoints
                     return MissionExecutionCommand.DroneExecution.create(
                             drone.vehicleId(),
+                            routeId,
                             waypoints
                     );
                 });
@@ -301,7 +305,7 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
      * REFACTORIZACIÓN: Ahora envía un solo mensaje en lugar de uno por dron
      *
      * @param mission Misión a ejecutar
-     * @param droneExecutions Lista de DroneExecution con vehicleId y waypoints
+     * @param droneExecutions Lista de DroneExecution con vehicleId, routeId y waypoints
      * @return CompletableFuture con la misión
      */
     private CompletableFuture<Mission> publishMissionExecutionCommand(
