@@ -3,9 +3,11 @@ package co.cetad.umas.operation.infrastructure.web.controller;
 import co.cetad.umas.operation.application.service.ApproveMissionService;
 import co.cetad.umas.operation.application.service.CreateMissionService;
 import co.cetad.umas.operation.application.service.ExecuteMissionService;
+import co.cetad.umas.operation.application.service.FinalizeMissionService;
 import co.cetad.umas.operation.domain.model.dto.ApproveMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.CreateMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.ExecuteMissionRequest;
+import co.cetad.umas.operation.domain.model.dto.FinalizeMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.MissionResponse;
 import co.cetad.umas.operation.domain.model.vo.Drone;
 import co.cetad.umas.operation.domain.model.vo.DroneMissionAssignment;
@@ -13,6 +15,7 @@ import co.cetad.umas.operation.domain.model.vo.Mission;
 import co.cetad.umas.operation.domain.ports.in.ApproveMissionUseCase;
 import co.cetad.umas.operation.domain.ports.in.CreateMissionUseCase;
 import co.cetad.umas.operation.domain.ports.in.ExecuteMissionUseCase;
+import co.cetad.umas.operation.domain.ports.in.FinalizeMissionUseCase;
 import co.cetad.umas.operation.domain.ports.out.DroneMissionAssignmentRepository;
 import co.cetad.umas.operation.domain.ports.out.DroneRepository;
 import co.cetad.umas.operation.infrastructure.web.mapper.MissionResponseMapper;
@@ -39,6 +42,7 @@ import java.util.stream.Collectors;
  * - POST /api/v1/missions                  - Crear misión con drones asignados
  * - POST /api/v1/missions/{id}/approve     - Aprobar misión
  * - POST /api/v1/missions/{id}/execute     - Ejecutar misión (todos los drones)
+ * - POST /api/v1/missions/{id}/finalize    - Finalizar misión
  */
 @Slf4j
 @RestController
@@ -49,6 +53,7 @@ public class MissionController {
     private final CreateMissionUseCase createMissionUseCase;
     private final ApproveMissionUseCase approveMissionUseCase;
     private final ExecuteMissionUseCase executeMissionUseCase;
+    private final FinalizeMissionUseCase finalizeMissionUseCase;
     private final DroneMissionAssignmentRepository assignmentRepository;
     private final DroneRepository droneRepository;
 
@@ -173,6 +178,41 @@ public class MissionController {
                 .doOnError(error ->
                         log.error("❌ Error executing mission: {}", id, error))
                 .onErrorResume(error -> handleExecuteError(error, id));
+    }
+
+    /**
+     * Finaliza una misión en ejecución
+     *
+     * POST /api/v1/missions/{id}/finalize
+     *
+     * Body:
+     * {
+     *   "commanderName": "Ana Martínez"
+     * }
+     */
+    @PostMapping(
+            value = "/finalize/{id}",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public Mono<ResponseEntity<MissionResponse>> finalizeMission(
+            @PathVariable String id,
+            @Valid @RequestBody FinalizeMissionRequest request
+    ) {
+        log.info("POST /api/v1/missions/finalize/{} - Finalizing mission by commander: {}",
+                id, request.commanderName());
+
+        return Mono.fromFuture(
+                        finalizeMissionUseCase.finalizeMission(id, request.commanderName())
+                )
+                .flatMap(this::loadMissionWithDroneDetails)
+                .map(ResponseEntity::ok)
+                .doOnSuccess(response ->
+                        log.info("✅ Mission finalized successfully: {} by commander: {}",
+                                extractResponseId(response), request.commanderName()))
+                .doOnError(error ->
+                        log.error("❌ Error finalizing mission: {}", id, error))
+                .onErrorResume(error -> handleFinalizeError(error, id));
     }
 
     /**
@@ -386,6 +426,34 @@ public class MissionController {
             }
             default -> {
                 log.error("❌ Unexpected error executing mission: {}", missionId, error);
+                yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
+            }
+        };
+    }
+
+    /**
+     * Maneja errores de finalización de misión con pattern matching
+     */
+    private Mono<ResponseEntity<MissionResponse>> handleFinalizeError(Throwable error, String missionId) {
+        return switch (error) {
+            case IllegalArgumentException e -> {
+                log.warn("⚠️ Invalid request for mission {}: {}", missionId, e.getMessage());
+                yield Mono.just(ResponseEntity.badRequest().build());
+            }
+            case FinalizeMissionService.MissionNotFoundException e -> {
+                log.warn("⚠️ Mission not found: {}", missionId);
+                yield Mono.just(ResponseEntity.notFound().build());
+            }
+            case FinalizeMissionService.InvalidMissionStateException e -> {
+                log.warn("⚠️ Invalid mission state for finalization: {}", missionId);
+                yield Mono.just(ResponseEntity.status(HttpStatus.CONFLICT).build());
+            }
+            case FinalizeMissionService.FinalizationRecordCreationException e -> {
+                log.error("❌ Error creating finalization record for mission: {}", missionId, e);
+                yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
+            }
+            default -> {
+                log.error("❌ Unexpected error finalizing mission: {}", missionId, error);
                 yield Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
             }
         };
