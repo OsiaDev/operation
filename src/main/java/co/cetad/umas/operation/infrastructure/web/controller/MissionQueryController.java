@@ -2,11 +2,9 @@ package co.cetad.umas.operation.infrastructure.web.controller;
 
 import co.cetad.umas.operation.domain.model.dto.HealthResponse;
 import co.cetad.umas.operation.domain.model.dto.MissionResponse;
-import co.cetad.umas.operation.domain.model.vo.Drone;
-import co.cetad.umas.operation.domain.model.vo.DroneMissionAssignment;
+import co.cetad.umas.operation.domain.model.vo.*;
 import co.cetad.umas.operation.domain.ports.in.MissionQueryUseCase;
-import co.cetad.umas.operation.domain.ports.out.DroneMissionAssignmentRepository;
-import co.cetad.umas.operation.domain.ports.out.DroneRepository;
+import co.cetad.umas.operation.domain.ports.out.*;
 import co.cetad.umas.operation.infrastructure.web.mapper.MissionResponseMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,8 +24,12 @@ import java.util.stream.Collectors;
 /**
  * Controller REST para consultas de misiones de drones
  *
- * REFACTORIZACIÓN: Ahora carga información completa de drones en una sola query
- * Previene el problema N+1 queries usando batch loading
+ * ACTUALIZACIÓN: Ahora carga información completa de auditoría
+ * (quién creó, aprobó, ejecutó y finalizó cada misión)
+ *
+ * OPTIMIZACIÓN:
+ * - Carga información completa de drones en una sola query (previene N+1)
+ * - Carga información de auditoría en paralelo
  *
  * Endpoints:
  * - GET /api/v1/missions                    - Listar todas las misiones
@@ -35,18 +37,6 @@ import java.util.stream.Collectors;
  * - GET /api/v1/missions/authorized         - Listar misiones autorizadas (MANUAL)
  * - GET /api/v1/missions/unauthorized       - Listar misiones no autorizadas (AUTOMATICA)
  * - GET /api/v1/missions/health             - Health check
- *
- * PATRÓN CQRS - QUERY SIDE:
- * - Usa MissionQueryUseCase que retorna Optional
- * - El controller decide el HTTP status (404, 200, etc.)
- * - Maneja errores de validación con HTTP 400
- * - Carga asignaciones de drones Y detalles completos de cada dron
- *
- * OPTIMIZACIÓN:
- * - Para evitar N+1 queries, carga todos los drones en batch
- * - Usa Map<droneId, Drone> para lookup O(1)
- *
- * Usa WebFlux para respuestas reactivas
  */
 @Slf4j
 @RestController
@@ -57,9 +47,13 @@ public class MissionQueryController {
     private final MissionQueryUseCase missionQueryUseCase;
     private final DroneMissionAssignmentRepository assignmentRepository;
     private final DroneRepository droneRepository;
+    private final MissionOrderRepository orderRepository;
+    private final MissionApprovalRepository approvalRepository;
+    private final MissionExecutionRepository executionRepository;
+    private final MissionFinalizationRepository finalizationRepository;
 
     /**
-     * Lista todas las misiones con sus drones asignados (información completa)
+     * Lista todas las misiones con sus drones asignados y auditoría completa
      *
      * GET /api/v1/missions
      *
@@ -71,7 +65,7 @@ public class MissionQueryController {
 
         return Mono.fromFuture(missionQueryUseCase.findAll())
                 .flatMapMany(Flux::fromIterable)
-                .flatMap(this::loadMissionWithDroneDetails)
+                .flatMap(this::loadMissionWithCompleteInfo)
                 .doOnComplete(() -> log.info("✅ Completed listing all missions"))
                 .doOnError(error -> {
                     log.error("❌ Error listing all missions", error);
@@ -84,7 +78,7 @@ public class MissionQueryController {
     }
 
     /**
-     * Busca una misión por ID con sus drones asignados (información completa)
+     * Busca una misión por ID con sus drones asignados y auditoría completa
      *
      * GET /api/v1/missions/{id}
      *
@@ -110,7 +104,7 @@ public class MissionQueryController {
                     }
 
                     var mission = missionOpt.get();
-                    return loadMissionWithDroneDetails(mission)
+                    return loadMissionWithCompleteInfo(mission)
                             .map(ResponseEntity::ok);
                 })
                 .doOnSuccess(response ->
@@ -147,7 +141,7 @@ public class MissionQueryController {
 
         return Mono.fromFuture(missionQueryUseCase.findAuthorizedMissions())
                 .flatMapMany(Flux::fromIterable)
-                .flatMap(this::loadMissionWithDroneDetails)
+                .flatMap(this::loadMissionWithCompleteInfo)
                 .doOnComplete(() -> log.info("✅ Completed listing authorized missions"))
                 .doOnError(error -> {
                     log.error("❌ Error listing authorized missions", error);
@@ -176,7 +170,7 @@ public class MissionQueryController {
 
         return Mono.fromFuture(missionQueryUseCase.findUnauthorizedMissions())
                 .flatMapMany(Flux::fromIterable)
-                .flatMap(this::loadMissionWithDroneDetails)
+                .flatMap(this::loadMissionWithCompleteInfo)
                 .doOnComplete(() -> log.info("✅ Completed listing unauthorized missions"))
                 .doOnError(error -> {
                     log.error("❌ Error listing unauthorized missions", error);
@@ -203,25 +197,42 @@ public class MissionQueryController {
     }
 
     /**
-     * Carga una misión con información completa de drones
-     * Previene N+1 queries cargando todos los drones en batch
+     * Carga una misión con información completa:
+     * - Drones asignados (información completa)
+     * - Auditoría completa (quién creó, aprobó, ejecutó y finalizó)
      *
      * OPTIMIZACIÓN:
-     * 1. Cargar asignaciones de la misión
-     * 2. Extraer IDs de drones únicos
-     * 3. Cargar TODOS los drones en batch (evita N+1 queries)
-     * 4. Crear Map para lookup O(1)
-     * 5. Mapear a response
+     * 1. Cargar asignaciones de drones
+     * 2. Cargar TODOS los drones en batch (evita N+1 queries)
+     * 3. Cargar información de auditoría EN PARALELO
+     * 4. Mapear a response con toda la información
      */
-    private Mono<MissionResponse> loadMissionWithDroneDetails(
-            co.cetad.umas.operation.domain.model.vo.Mission mission
-    ) {
-        return Mono.fromFuture(assignmentRepository.findByMissionId(mission.id()))
-                .flatMap(assignments -> {
+    private Mono<MissionResponse> loadMissionWithCompleteInfo(Mission mission) {
+        log.debug("Loading complete info for mission: {}", mission.id());
+
+        // Cargar asignaciones y auditoría EN PARALELO
+        Mono<List<DroneMissionAssignment>> assignmentsMono =
+                Mono.fromFuture(assignmentRepository.findByMissionId(mission.id()));
+
+        Mono<AuditInfo> auditMono = loadAuditInfo(mission);
+
+        return Mono.zip(assignmentsMono, auditMono)
+                .flatMap(tuple -> {
+                    List<DroneMissionAssignment> assignments = tuple.getT1();
+                    AuditInfo audit = tuple.getT2();
+
                     if (assignments.isEmpty()) {
-                        // Sin drones asignados, retornar response simple
+                        // Sin drones asignados, retornar response con auditoría
                         return Mono.just(
-                                MissionResponseMapper.toResponseWithoutAssignments(mission)
+                                MissionResponseMapper.toResponse(
+                                        mission,
+                                        List.of(),
+                                        Map.of(),
+                                        audit.order(),
+                                        audit.approval(),
+                                        audit.execution(),
+                                        audit.finalization()
+                                )
                         );
                     }
 
@@ -242,10 +253,79 @@ public class MissionQueryController {
                                 return MissionResponseMapper.toResponse(
                                         mission,
                                         assignments,
-                                        dronesMap
+                                        dronesMap,
+                                        audit.order(),
+                                        audit.approval(),
+                                        audit.execution(),
+                                        audit.finalization()
                                 );
                             });
                 });
+    }
+
+    /**
+     * Carga información de auditoría EN PARALELO
+     *
+     * OPTIMIZACIÓN: Todas las consultas se ejecutan en paralelo
+     *
+     * @param mission Misión para la cual cargar auditoría
+     * @return Mono con información de auditoría completa
+     */
+    private Mono<AuditInfo> loadAuditInfo(Mission mission) {
+        log.debug("Loading audit info for mission: {}", mission.id());
+
+        // Cargar TODOS los registros de auditoría en paralelo
+        Mono<MissionOrder> orderMono = Mono.fromFuture(
+                orderRepository.findByMissionId(mission.id())
+        ).map(opt -> opt.orElse(null));
+
+        Mono<MissionApproval> approvalMono = Mono.fromFuture(
+                approvalRepository.findByMissionId(mission.id())
+        ).map(opt -> opt.orElse(null));
+
+        Mono<MissionExecution> executionMono = Mono.fromFuture(
+                executionRepository.findByMissionId(mission.id())
+        ).map(opt -> opt.orElse(null));
+
+        Mono<MissionFinalization> finalizationMono = Mono.fromFuture(
+                finalizationRepository.findByMissionId(mission.id())
+        ).map(opt -> opt.orElse(null));
+
+        // Combinar todos los resultados
+        return Mono.zip(orderMono, approvalMono, executionMono, finalizationMono)
+                .map(tuple -> new AuditInfo(
+                        tuple.getT1(),
+                        tuple.getT2(),
+                        tuple.getT3(),
+                        tuple.getT4()
+                ))
+                .doOnSuccess(audit -> {
+                    log.debug("✅ Loaded audit info for mission: {} " +
+                                    "(order: {}, approval: {}, execution: {}, finalization: {})",
+                            mission.id(),
+                            audit.order() != null,
+                            audit.approval() != null,
+                            audit.execution() != null,
+                            audit.finalization() != null);
+                })
+                .onErrorResume(error -> {
+                    log.warn("⚠️ Error loading audit info for mission: {}, " +
+                            "returning empty audit", mission.id(), error);
+                    // En caso de error, retornar audit vacío para degradar gracefully
+                    return Mono.just(new AuditInfo(null, null, null, null));
+                });
+    }
+
+    /**
+     * Busca un registro de auditoría específico por ID de misión
+     * Devuelve null si no existe
+     */
+    private <T> Mono<T> findAuditRecord(
+            CompletableFuture<java.util.Optional<T>> future
+    ) {
+        return Mono.fromFuture(future)
+                .map(opt -> opt.orElse(null))
+                .onErrorReturn(null);
     }
 
     /**
@@ -283,5 +363,15 @@ public class MissionQueryController {
             return Mono.just(Map.of());
         });
     }
+
+    /**
+     * Record para encapsular información de auditoría
+     */
+    private record AuditInfo(
+            MissionOrder order,
+            MissionApproval approval,
+            MissionExecution execution,
+            MissionFinalization finalization
+    ) {}
 
 }

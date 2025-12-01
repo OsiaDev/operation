@@ -1,22 +1,18 @@
 package co.cetad.umas.operation.infrastructure.web.mapper;
 
 import co.cetad.umas.operation.domain.model.dto.MissionResponse;
-import co.cetad.umas.operation.domain.model.vo.Drone;
-import co.cetad.umas.operation.domain.model.vo.DroneMissionAssignment;
-import co.cetad.umas.operation.domain.model.vo.Mission;
+import co.cetad.umas.operation.domain.model.vo.*;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.BiFunction;
-import java.util.stream.Collectors;
 
 /**
  * Mapper funcional de modelo de dominio a DTO de respuesta
  * Mantiene separación entre capas
  *
- * REFACTORIZACIÓN: Ahora incluye información completa de cada dron asignado
- * Recibe un Map de droneId -> Drone para evitar N+1 queries
+ * ACTUALIZACIÓN: Ahora incluye información de auditoría completa
+ * (quién creó, aprobó, ejecutó y finalizó la misión)
  */
 public final class MissionResponseMapper {
 
@@ -25,19 +21,27 @@ public final class MissionResponseMapper {
     }
 
     /**
-     * Convierte Mission + asignaciones + drones a MissionResponse
+     * Convierte Mission + asignaciones + drones + auditoría a MissionResponse
      *
      * OPTIMIZACIÓN: Recibe Map de drones precargados para evitar N+1 queries
      *
      * @param mission Misión del dominio
      * @param assignments Lista de asignaciones de drones a la misión
      * @param dronesMap Map de droneId -> Drone (precargado)
+     * @param order Orden de misión (quién creó)
+     * @param approval Aprobación de misión (quién aprobó)
+     * @param execution Ejecución de misión (quién ejecutó)
+     * @param finalization Finalización de misión (quién finalizó)
      * @return MissionResponse con toda la información
      */
     public static MissionResponse toResponse(
             Mission mission,
             List<DroneMissionAssignment> assignments,
-            Map<String, Drone> dronesMap
+            Map<String, Drone> dronesMap,
+            MissionOrder order,
+            MissionApproval approval,
+            MissionExecution execution,
+            MissionFinalization finalization
     ) {
         // Mapear asignaciones de drones con información completa
         List<MissionResponse.DroneAssignmentResponse> droneResponses = assignments.stream()
@@ -93,6 +97,11 @@ public final class MissionResponseMapper {
                 mission.startDate(),
                 mission.endDate(),
                 droneResponses,
+                // Auditoría
+                order != null ? order.commanderName() : null,
+                approval != null ? approval.commanderName() : null,
+                execution != null ? execution.commanderName() : null,
+                finalization != null ? finalization.commanderName() : null,
                 mission.createdAt(),
                 mission.updatedAt(),
                 mission.hasName(),
@@ -108,7 +117,7 @@ public final class MissionResponseMapper {
 
     /**
      * Convierte Mission + asignaciones a MissionResponse
-     * SIN información de drones (solo IDs)
+     * SIN información de drones (solo IDs) ni auditoría
      *
      * Útil cuando no necesitas cargar los drones completos
      */
@@ -116,15 +125,15 @@ public final class MissionResponseMapper {
             Mission mission,
             List<DroneMissionAssignment> assignments
     ) {
-        return toResponse(mission, assignments, Map.of());
+        return toResponse(mission, assignments, Map.of(), null, null, null, null);
     }
 
     /**
      * Convierte Mission SIN asignaciones a MissionResponse
-     * Útil cuando solo necesitas la misión sin información de drones
+     * Útil cuando solo necesitas la misión sin información de drones ni auditoría
      */
     public static MissionResponse toResponseWithoutAssignments(Mission mission) {
-        return toResponse(mission, List.of(), Map.of());
+        return toResponse(mission, List.of(), Map.of(), null, null, null, null);
     }
 
 }

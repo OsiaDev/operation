@@ -12,8 +12,9 @@ import java.util.UUID;
 
 /**
  * DTO de response para misiones con información completa de drones asignados
+ * y auditoría completa (quién creó, aprobó, ejecutó y finalizó)
  *
- * REFACTORIZACIÓN: Ahora incluye toda la información del dron, no solo IDs
+ * ACTUALIZACIÓN: Ahora incluye información de auditoría completa
  */
 public record MissionResponse(
         @JsonProperty("id")
@@ -45,6 +46,19 @@ public record MissionResponse(
 
         @JsonProperty("assignedDrones")
         List<DroneAssignmentResponse> assignedDrones,
+
+        // ===== AUDITORÍA: Quién realizó cada acción =====
+        @JsonProperty("createdBy")
+        String createdBy,
+
+        @JsonProperty("approvedBy")
+        String approvedBy,
+
+        @JsonProperty("executedBy")
+        String executedBy,
+
+        @JsonProperty("finalizedBy")
+        String finalizedBy,
 
         @JsonProperty("createdAt")
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")

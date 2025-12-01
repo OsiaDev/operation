@@ -16,13 +16,16 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Servicio de aplicación para ejecutar misiones con múltiples drones
  *
- * REFACTORIZACIÓN: Ahora coordina:
+ * ACTUALIZACIÓN: Ahora crea registro de auditoría de ejecución con commanderName
+ *
+ * Flujo:
  * 1. Validación de la misión
  * 2. Búsqueda de TODOS los drones asignados a la misión
  * 3. Para cada dron: buscar ruta, extraer waypoints, incluir routeId
  * 4. Construir lista de DroneExecution (vehicleId + routeId + waypoints)
  * 5. Publicar UN SOLO mensaje con todos los drones
- * 6. Actualización del estado de la misión a EN_EJECUCION
+ * 6. Crear registro de ejecución con commanderName
+ * 7. Actualización del estado de la misión a EN_EJECUCION
  */
 @Slf4j
 @Service
@@ -35,6 +38,7 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
     private final DroneRepository droneRepository;
     private final GeoJsonParserService geoJsonParserService;
     private final MissionExecutionPublisher executionPublisher;
+    private final MissionExecutionRepository missionExecutionRepository;
 
     @Override
     public CompletableFuture<Mission> executeMission(
@@ -54,7 +58,7 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
 
                     Mission mission = missionOpt.get();
                     return validateMissionState(mission)
-                            .thenCompose(this::executeMissionFlow);
+                            .thenCompose(validatedMission -> executeMissionFlow(validatedMission, commanderName));
                 })
                 .thenApply(executedMission -> {
                     log.info("✅ Mission executed successfully: {} by commander: {}",
@@ -119,11 +123,10 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
      * 2. Para cada dron: obtener vehicleId, buscar ruta, extraer waypoints, incluir routeId
      * 3. Construir lista de DroneExecution con vehicleId, routeId y waypoints
      * 4. Publicar UN SOLO comando con todos los drones
-     * 5. Actualizar estado de la misión a EN_EJECUCION con start_date
-     *
-     * ACTUALIZACIÓN: Ahora incluye routeId en cada DroneExecution
+     * 5. Crear registro de ejecución con commanderName
+     * 6. Actualizar estado de la misión a EN_EJECUCION con start_date
      */
-    private CompletableFuture<Mission> executeMissionFlow(Mission mission) {
+    private CompletableFuture<Mission> executeMissionFlow(Mission mission, String commanderName) {
         log.info("🚀 Starting execution flow for mission: {}", mission.id());
 
         // Paso 1: Buscar todas las asignaciones de drones para esta misión
@@ -146,9 +149,11 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
                     return publishMissionExecutionCommand(mission, droneExecutions);
                 })
                 .thenCompose(processedMission -> {
-                    // Paso 4: Actualizar estado de la misión a EN_EJECUCION
-                    return updateMissionToInProgress(processedMission);
+                    // Paso 4: Crear registro de ejecución con commanderName
+                    return createExecutionRecord(processedMission, commanderName)
+                            .thenApply(execution -> processedMission);
                 })
+                .thenCompose(this::updateMissionToInProgress)
                 .exceptionally(throwable -> {
                     log.error("❌ Error in execution flow for mission: {}",
                             mission.id(), throwable);
@@ -164,7 +169,6 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
      * Cada DroneExecution contiene el vehicleId, routeId y waypoints del dron
      *
      * OPTIMIZACIÓN: Procesa todos los drones en paralelo
-     * ACTUALIZACIÓN: Ahora incluye routeId en cada DroneExecution
      *
      * @param mission Misión a ejecutar
      * @param assignments Lista de asignaciones de drones
@@ -252,8 +256,6 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
     /**
      * Carga los waypoints de la ruta asignada a un dron
      *
-     * ACTUALIZACIÓN: Ahora incluye el routeId en el DroneExecution
-     *
      * @param drone Dron al que se le asignará la ruta
      * @param routeId ID de la ruta a cargar
      * @return CompletableFuture con DroneExecution que incluye vehicleId, routeId y waypoints
@@ -302,8 +304,6 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
     /**
      * Publica UN SOLO comando de ejecución con TODOS los drones
      *
-     * REFACTORIZACIÓN: Ahora envía un solo mensaje en lugar de uno por dron
-     *
      * @param mission Misión a ejecutar
      * @param droneExecutions Lista de DroneExecution con vehicleId, routeId y waypoints
      * @return CompletableFuture con la misión
@@ -329,6 +329,34 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
                     throw new CommandPublishException(
                             String.format("Failed to publish execution command for mission: %s",
                                     mission.id()),
+                            throwable
+                    );
+                });
+    }
+
+    /**
+     * Crea el registro de ejecución con commanderName
+     */
+    private CompletableFuture<MissionExecution> createExecutionRecord(
+            Mission mission,
+            String commanderName
+    ) {
+        log.debug("Creating execution record for mission: {} by commander: {}",
+                mission.id(), commanderName);
+
+        MissionExecution execution = MissionExecution.create(mission.id(), commanderName);
+
+        return missionExecutionRepository.save(execution)
+                .thenApply(savedExecution -> {
+                    log.info("✅ Execution record created: {} for mission: {}",
+                            savedExecution.id(), mission.id());
+                    return savedExecution;
+                })
+                .exceptionally(throwable -> {
+                    log.error("❌ Failed to create execution record for mission: {}",
+                            mission.id(), throwable);
+                    throw new ExecutionRecordCreationException(
+                            "Failed to create execution record for mission: " + mission.id(),
                             throwable
                     );
                 });
@@ -408,6 +436,12 @@ public class ExecuteMissionService implements ExecuteMissionUseCase {
 
     public static class CommandPublishException extends RuntimeException {
         public CommandPublishException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    public static class ExecutionRecordCreationException extends RuntimeException {
+        public ExecutionRecordCreationException(String message, Throwable cause) {
             super(message, cause);
         }
     }
