@@ -20,4 +20,10 @@ public interface MissionOrderRepository {
      */
     CompletableFuture<Optional<MissionOrder>> findById(String id);
 
+    /**
+     * Busca una orden por ID de misión
+     * Útil para obtener quién creó una misión específica
+     */
+    CompletableFuture<Optional<MissionOrder>> findByMissionId(String missionId);
+
 }

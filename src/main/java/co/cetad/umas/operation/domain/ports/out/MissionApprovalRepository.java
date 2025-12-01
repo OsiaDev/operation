@@ -20,4 +20,10 @@ public interface MissionApprovalRepository {
      */
     CompletableFuture<Optional<MissionApproval>> findById(String id);
 
+    /**
+     * Busca una aprobación por ID de misión
+     * Útil para obtener quién aprobó una misión específica
+     */
+    CompletableFuture<Optional<MissionApproval>> findByMissionId(String missionId);
+
 }

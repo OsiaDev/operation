@@ -97,7 +97,7 @@ public final class MissionResponseMapper {
                 mission.startDate(),
                 mission.endDate(),
                 droneResponses,
-                // Auditoría
+                // ✅ AUDITORÍA COMPLETA
                 order != null ? order.commanderName() : null,
                 approval != null ? approval.commanderName() : null,
                 execution != null ? execution.commanderName() : null,

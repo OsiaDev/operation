@@ -64,6 +64,21 @@ public class MissionOrderPersistenceAdapter implements MissionOrderRepository {
         });
     }
 
+    @Override
+    @Async
+    @Transactional(readOnly = true)
+    public CompletableFuture<Optional<MissionOrder>> findByMissionId(String missionId) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return repository.findByMissionId(UUID.fromString(missionId))
+                        .map(MissionOrderMapper.toDomain);
+            } catch (Exception e) {
+                log.error("❌ Error finding mission order by mission id: {}", missionId, e);
+                return Optional.empty();
+            }
+        });
+    }
+
     public static class DatabaseOperationException extends RuntimeException {
         public DatabaseOperationException(String message, Throwable cause) {
             super(message, cause);

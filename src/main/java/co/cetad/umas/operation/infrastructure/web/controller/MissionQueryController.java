@@ -317,18 +317,6 @@ public class MissionQueryController {
     }
 
     /**
-     * Busca un registro de auditoría específico por ID de misión
-     * Devuelve null si no existe
-     */
-    private <T> Mono<T> findAuditRecord(
-            CompletableFuture<java.util.Optional<T>> future
-    ) {
-        return Mono.fromFuture(future)
-                .map(opt -> opt.orElse(null))
-                .onErrorReturn(null);
-    }
-
-    /**
      * Carga múltiples drones en batch para evitar N+1 queries
      *
      * OPTIMIZACIÓN: Usa CompletableFuture.allOf para cargar en paralelo

@@ -64,6 +64,21 @@ public class MissionApprovalPersistenceAdapter implements MissionApprovalReposit
         });
     }
 
+    @Override
+    @Async
+    @Transactional(readOnly = true)
+    public CompletableFuture<Optional<MissionApproval>> findByMissionId(String missionId) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return repository.findByMissionId(UUID.fromString(missionId))
+                        .map(MissionApprovalMapper.toDomain);
+            } catch (Exception e) {
+                log.error("❌ Error finding mission approval by mission id: {}", missionId, e);
+                return Optional.empty();
+            }
+        });
+    }
+
     public static class DatabaseOperationException extends RuntimeException {
         public DatabaseOperationException(String message, Throwable cause) {
             super(message, cause);

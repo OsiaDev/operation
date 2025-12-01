@@ -9,15 +9,12 @@ import co.cetad.umas.operation.domain.model.dto.CreateMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.ExecuteMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.FinalizeMissionRequest;
 import co.cetad.umas.operation.domain.model.dto.MissionResponse;
-import co.cetad.umas.operation.domain.model.vo.Drone;
-import co.cetad.umas.operation.domain.model.vo.DroneMissionAssignment;
-import co.cetad.umas.operation.domain.model.vo.Mission;
+import co.cetad.umas.operation.domain.model.vo.*;
 import co.cetad.umas.operation.domain.ports.in.ApproveMissionUseCase;
 import co.cetad.umas.operation.domain.ports.in.CreateMissionUseCase;
 import co.cetad.umas.operation.domain.ports.in.ExecuteMissionUseCase;
 import co.cetad.umas.operation.domain.ports.in.FinalizeMissionUseCase;
-import co.cetad.umas.operation.domain.ports.out.DroneMissionAssignmentRepository;
-import co.cetad.umas.operation.domain.ports.out.DroneRepository;
+import co.cetad.umas.operation.domain.ports.out.*;
 import co.cetad.umas.operation.infrastructure.web.mapper.MissionResponseMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -36,7 +33,7 @@ import java.util.stream.Collectors;
 /**
  * Controller REST para misiones con múltiples drones
  *
- * REFACTORIZACIÓN: Ahora retorna información completa de drones en responses
+ * REFACTORIZACIÓN: Ahora retorna información completa de drones y auditoría en responses
  *
  * Endpoints:
  * - POST /api/v1/missions                  - Crear misión con drones asignados
@@ -56,6 +53,12 @@ public class MissionController {
     private final FinalizeMissionUseCase finalizeMissionUseCase;
     private final DroneMissionAssignmentRepository assignmentRepository;
     private final DroneRepository droneRepository;
+
+    // ===== REPOSITORIOS DE AUDITORÍA =====
+    private final MissionOrderRepository orderRepository;
+    private final MissionApprovalRepository approvalRepository;
+    private final MissionExecutionRepository executionRepository;
+    private final MissionFinalizationRepository finalizationRepository;
 
     /**
      * Crea una nueva misión con múltiples drones asignados
@@ -243,23 +246,42 @@ public class MissionController {
     }
 
     /**
-     * Carga una misión con información completa de drones
-     * Previene N+1 queries cargando todos los drones en batch
+     * Carga una misión con información completa:
+     * - Drones asignados (información completa)
+     * - Auditoría completa (quién creó, aprobó, ejecutó y finalizó)
      *
      * OPTIMIZACIÓN:
-     * 1. Cargar asignaciones de la misión
-     * 2. Extraer IDs de drones únicos
-     * 3. Cargar TODOS los drones en batch (evita N+1 queries)
-     * 4. Crear Map para lookup O(1)
-     * 5. Mapear a response
+     * 1. Cargar asignaciones de drones
+     * 2. Cargar TODOS los drones en batch (evita N+1 queries)
+     * 3. Cargar información de auditoría EN PARALELO
+     * 4. Mapear a response con toda la información
      */
     private Mono<MissionResponse> loadMissionWithDroneDetails(Mission mission) {
-        return Mono.fromFuture(assignmentRepository.findByMissionId(mission.id()))
-                .flatMap(assignments -> {
+        log.debug("Loading complete info for mission: {}", mission.id());
+
+        // Cargar asignaciones y auditoría EN PARALELO
+        Mono<List<DroneMissionAssignment>> assignmentsMono =
+                Mono.fromFuture(assignmentRepository.findByMissionId(mission.id()));
+
+        Mono<AuditInfo> auditMono = loadAuditInfo(mission);
+
+        return Mono.zip(assignmentsMono, auditMono)
+                .flatMap(tuple -> {
+                    List<DroneMissionAssignment> assignments = tuple.getT1();
+                    AuditInfo audit = tuple.getT2();
+
                     if (assignments.isEmpty()) {
-                        // Sin drones asignados, retornar response simple
+                        // Sin drones asignados, retornar response con auditoría
                         return Mono.just(
-                                MissionResponseMapper.toResponseWithoutAssignments(mission)
+                                MissionResponseMapper.toResponse(
+                                        mission,
+                                        List.of(),
+                                        Map.of(),
+                                        audit.order(),
+                                        audit.approval(),
+                                        audit.execution(),
+                                        audit.finalization()
+                                )
                         );
                     }
 
@@ -280,9 +302,66 @@ public class MissionController {
                                 return MissionResponseMapper.toResponse(
                                         mission,
                                         assignments,
-                                        dronesMap
+                                        dronesMap,
+                                        audit.order(),
+                                        audit.approval(),
+                                        audit.execution(),
+                                        audit.finalization()
                                 );
                             });
+                });
+    }
+
+    /**
+     * Carga información de auditoría EN PARALELO
+     *
+     * OPTIMIZACIÓN: Todas las consultas se ejecutan en paralelo
+     *
+     * @param mission Misión para la cual cargar auditoría
+     * @return Mono con información de auditoría completa
+     */
+    private Mono<AuditInfo> loadAuditInfo(Mission mission) {
+        log.debug("Loading audit info for mission: {}", mission.id());
+
+        // Cargar TODOS los registros de auditoría en paralelo
+        Mono<MissionOrder> orderMono = Mono.fromFuture(
+                orderRepository.findByMissionId(mission.id())
+        ).map(opt -> opt.orElse(null));
+
+        Mono<MissionApproval> approvalMono = Mono.fromFuture(
+                approvalRepository.findByMissionId(mission.id())
+        ).map(opt -> opt.orElse(null));
+
+        Mono<MissionExecution> executionMono = Mono.fromFuture(
+                executionRepository.findByMissionId(mission.id())
+        ).map(opt -> opt.orElse(null));
+
+        Mono<MissionFinalization> finalizationMono = Mono.fromFuture(
+                finalizationRepository.findByMissionId(mission.id())
+        ).map(opt -> opt.orElse(null));
+
+        // Combinar todos los resultados
+        return Mono.zip(orderMono, approvalMono, executionMono, finalizationMono)
+                .map(tuple -> new AuditInfo(
+                        tuple.getT1(),
+                        tuple.getT2(),
+                        tuple.getT3(),
+                        tuple.getT4()
+                ))
+                .doOnSuccess(audit -> {
+                    log.debug("✅ Loaded audit info for mission: {} " +
+                                    "(order: {}, approval: {}, execution: {}, finalization: {})",
+                            mission.id(),
+                            audit.order() != null,
+                            audit.approval() != null,
+                            audit.execution() != null,
+                            audit.finalization() != null);
+                })
+                .onErrorResume(error -> {
+                    log.warn("⚠️ Error loading audit info for mission: {}, " +
+                            "returning empty audit", mission.id(), error);
+                    // En caso de error, retornar audit vacío para degradar gracefully
+                    return Mono.just(new AuditInfo(null, null, null, null));
                 });
     }
 
@@ -330,6 +409,16 @@ public class MissionController {
                 ? response.getBody().id().toString()
                 : "unknown";
     }
+
+    /**
+     * Record para encapsular información de auditoría
+     */
+    private record AuditInfo(
+            MissionOrder order,
+            MissionApproval approval,
+            MissionExecution execution,
+            MissionFinalization finalization
+    ) {}
 
     /**
      * Maneja errores de creación de misión con pattern matching
